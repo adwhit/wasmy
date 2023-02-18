@@ -1,13 +1,14 @@
 // Useful links:
 // https://pengowray.github.io/wasm-ops/
 // https://coinexsmartchain.medium.com/wasm-introduction-part-1-binary-format-57895d851580
+// https://webassembly.github.io/spec/core/
 
 use std::path::PathBuf;
 
 use nom::{
-    bytes::complete::{tag, take_while},
-    combinator::{eof, map_opt, map_res},
-    multi::{count, length_count, length_data, many1, many_till},
+    bytes::complete::{tag, take_until, take_while},
+    combinator::{eof, map, map_opt, map_res},
+    multi::{count, length_count, length_data, many1},
     number::complete::le_u32,
     number::complete::u8,
     sequence::{terminated, tuple},
@@ -102,10 +103,15 @@ pub struct Global {
     pub expr: Vec<Instruction>,
 }
 
-fn global(input: &[u8]) -> Result<Global> {
-    let (input, (typ, mutable)) = tuple((value, mutability))(input)?;
-    let (input, (mut expr, _end)) = many_till(u8, tag(&[0x0B]))(input)?;
+fn instructions(input: &[u8]) -> Result<Vec<Instruction>> {
+    let (input, (expr, _)) = tuple((take_until(&[0x0B][..]), u8))(input)?;
+    let mut expr = expr.to_vec();
     expr.push(0x0B);
+    Ok((input, expr))
+}
+
+fn global(input: &[u8]) -> Result<Global> {
+    let (input, (typ, mutable, expr)) = tuple((value, mutability, instructions))(input)?;
     Ok((input, Global { typ, mutable, expr }))
 }
 
@@ -154,12 +160,27 @@ fn export(input: &[u8]) -> Result<Export> {
 }
 
 #[derive(Debug)]
+pub struct Code {
+    pub locals: Vec<(u32, Value)>,
+    pub code: Vec<Instruction>,
+}
+
+fn code(input: &[u8]) -> Result<Code> {
+    let (input, _size) = leb28(input)?;
+    let (input, locals) = length_count(leb28, tuple((map(leb28, |v| v as u32), value)))(input)?;
+    let (input, code) = instructions(input)?;
+    Ok((input, Code { locals, code }))
+}
+
+#[derive(Debug)]
 pub enum Section {
     Types(Vec<FuncSig>),
     Functions(Vec<u64>),
     Memory(Vec<Limits>),
     Global(Vec<Global>),
     Export(Vec<Export>),
+    Code(Vec<Code>),
+    Data(Vec<Data>),
     Anon(AnonSection),
 }
 
@@ -192,6 +213,26 @@ fn func_sig(input: &[u8]) -> Result<FuncSig> {
     let (input, nresults) = leb28(input)?;
     let (input, results) = count(value, nresults as usize)(input)?;
     Ok((input, FuncSig { params, results }))
+}
+
+#[derive(Debug)]
+pub struct Data {
+    pub mem_idx: u64,
+    pub offset: Vec<Instruction>,
+    pub init: Vec<u8>,
+}
+
+fn data(input: &[u8]) -> Result<Data> {
+    let (input, (mem_idx, offset)) = tuple((map(u8, u64::from), instructions))(input)?;
+    let (input, init) = length_data(leb28)(input)?;
+    Ok((
+        input,
+        Data {
+            mem_idx,
+            offset,
+            init: init.to_vec(),
+        },
+    ))
 }
 
 fn leb28(input: &[u8]) -> Result<u64> {
@@ -244,6 +285,14 @@ fn section(input: &[u8]) -> Result<Section> {
         SectionId::Export => {
             let (_, exports) = length_count(leb28, export)(section_data)?;
             Section::Export(exports)
+        }
+        SectionId::Code => {
+            let (_, code) = length_count(leb28, code)(section_data)?;
+            Section::Code(code)
+        }
+        SectionId::Data => {
+            let (_, data) = length_count(leb28, data)(section_data)?;
+            Section::Data(data)
         }
         _ => Section::Anon(AnonSection {
             id,

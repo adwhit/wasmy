@@ -1,0 +1,8 @@
+[workspace]
+members = [
+  "iii",
+  "wasmi"
+]
+
+[profile.release]
+strip = true

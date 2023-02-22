@@ -12,6 +12,7 @@ pub fn add(x: i32, y: i32) -> i32 {
 }
 
 #[no_mangle]
+#[inline(never)]
 pub fn hello(nice: bool) -> &'static str {
     if nice {
         "you can have anything you want!"
@@ -23,7 +24,7 @@ pub fn hello(nice: bool) -> &'static str {
 pub enum Tag {
     One,
     Two,
-    Three(u32)
+    Three(u32),
 }
 
 #[no_mangle]
@@ -32,6 +33,15 @@ pub fn tagliatelle(tag: Tag) -> i32 {
     match tag {
         Tag::One => add(1234, val),
         Tag::Two => add(5678, val),
-        Tag::Three(v) => add(v as i32, val)
+        Tag::Three(v) => add(v as i32, val),
+    }
+}
+
+#[no_mangle]
+pub fn whatcha_get(tag: i32) -> &'static str {
+    if tag < 0 {
+        "some thing some thing"
+    } else {
+        hello(tag > 50)
     }
 }

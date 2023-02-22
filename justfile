@@ -16,3 +16,7 @@ dump:
 clean:
     cargo clean
     cd demo && cargo clean
+
+fmt:
+    cargo fmt
+    cd demo && cargo fmt

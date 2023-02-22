@@ -6,6 +6,7 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 }
 
 #[no_mangle]
+#[inline(never)]
 pub fn add(x: i32, y: i32) -> i32 {
     x + y
 }

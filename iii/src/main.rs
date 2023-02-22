@@ -37,6 +37,7 @@ pub enum OpCode {
     BrIf = 0x0D,
     BrTable = 0x0E,
     Return = 0x0F,
+    Call = 0x10,
     Drop = 0x1A,
     Select = 0x1B,
     LocalGet = 0x20,
@@ -61,11 +62,13 @@ pub enum Instruction {
         expr: Vec<Instruction>,
     },
     End,
+    Br(u32),
     BrTable {
         branch_ixs: Vec<u32>,
         default_ix: u32,
     },
     Return,
+    Call(u32),
     Select,
     LocalGet(u32),
     LocalSet(u32),
@@ -103,6 +106,7 @@ fn instruction(input: &[u8]) -> Result<Instruction> {
             Ok((input, I::Block { typ, expr }))
         }
         O::End => Ok((input, I::End)),
+        O::Br => map(leb128_u32, I::Br)(input),
         O::BrTable => map(
             tuple((length_count(leb128_u32, leb128_u32), leb128_u32)),
             |(branch_ixs, default_ix)| I::BrTable {
@@ -111,6 +115,7 @@ fn instruction(input: &[u8]) -> Result<Instruction> {
             },
         )(input),
         O::Return => Ok((input, I::Return)),
+        O::Call => map(leb128_u32, I::Call)(input),
         O::Select => Ok((input, I::Select)),
         O::LocalGet => map(leb128_u32, I::LocalGet)(input),
         O::LocalSet => map(leb128_u32, I::LocalSet)(input),
@@ -182,7 +187,6 @@ pub struct Global {
 }
 
 fn global(input: &[u8]) -> Result<Global> {
-    println!("{input:x?}");
     let (input, (typ, mutable, expr)) = tuple((value, mutability, ast))(input)?;
     Ok((input, Global { typ, mutable, expr }))
 }
@@ -362,6 +366,8 @@ fn section(input: &[u8]) -> Result<Section> {
     let (input, section_data) = length_data(leb128)(input)?;
     println!("Segment: {id:?}");
 
+    // TODO if segment parsing fails, should be a HARD error
+
     let section = match id {
         SectionId::Type => {
             let (_, funcs) = function_sigs(section_data)?;
@@ -411,23 +417,67 @@ fn parse_wasm(input: &[u8]) -> anyhow::Result<Binary, nom::error::Error<&[u8]>> 
     Ok(out)
 }
 
+fn print_ast(code: &[Instruction]) {
+    use Instruction::*;
+
+    fn inner(code: &[Instruction], depth: &mut usize) {
+        for c in code {
+            match c {
+                Block { typ, expr } => {
+                    print_indent("(block", *depth);
+                    *depth += 1;
+                    inner(expr, depth);
+                }
+                End => {
+                    if *depth > 0 {
+                        *depth -= 1;
+                    }
+                    print_indent(")", *depth)
+                }
+                Br(val) => print_indent("(br)", *depth),
+                BrTable {
+                    branch_ixs,
+                    default_ix,
+                } => print_indent("(br_table)", *depth),
+                Return => print_indent("(return)", *depth),
+                Call(ix) => print_indent("(call)", *depth),
+                Select => print_indent("(select)", *depth),
+                LocalGet(ix) => print_indent(&format!("(local_get ${ix})"), *depth),
+                LocalSet(ix) => print_indent(&format!("(local_set ${ix})"), *depth),
+                I32Const(c) => print_indent(&format!("(i32_const {c})"), *depth),
+                I32Store { offset, alignment } => {
+                    print_indent(&format!("(i32_store {offset})"), *depth)
+                }
+                Add => print_indent("(add)", *depth),
+                _other => print_indent("(inst)", *depth),
+            }
+        }
+    }
+    let mut depth = 0;
+    inner(code, &mut depth)
+}
+
+fn print_indent(s: &str, indent: usize) {
+    println!("{:>width$}{}", "", s, width = indent * 4);
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let code = std::fs::read(cli.file)?;
     let binary = parse_wasm(&code).map_err(|e| anyhow::format_err!("{:?}", e.code))?;
     println!("{binary:?}");
 
-    // for s in binary.sections {
-    //     match s {
-    //         Section::Code(codes) => {
-    //             for code in codes {
-    //                 let (_, code) = ast(&code.code).unwrap();
-    //                 println!("{:?}", code);
-    //             }
-    //         }
-    //         _ => {}
-    //     }
-    // }
+    for s in binary.sections {
+        match s {
+            Section::Code(codes) => {
+                for code in codes {
+                    println!("Function");
+                    print_ast(&code.code);
+                }
+            }
+            _ => {}
+        }
+    }
 
     Ok(())
 }

@@ -12,3 +12,7 @@ dis:
 
 dump:
     xxd demo/target/wasm32-unknown-unknown/release/demo.wasm
+
+clean:
+    cargo clean
+    cd demo && cargo clean

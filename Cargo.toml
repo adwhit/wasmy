@@ -1,8 +1,8 @@
 [workspace]
 members = [
   "iii",
-  "wasmi"
 ]
+exclude = ["demo"]
 
 [profile.release]
 strip = true

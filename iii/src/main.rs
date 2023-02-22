@@ -9,8 +9,8 @@ use nom::{
     bytes::complete::{tag, take_until, take_while},
     combinator::{eof, map, map_opt, map_res, recognize},
     multi::{count, length_count, length_data, many1},
-    number::complete::le_u32,
-    number::complete::{le_i32, u8},
+    number::complete::le_u32 as the_u32,
+    number::complete::u8,
     sequence::{terminated, tuple},
     Finish, IResult,
 };
@@ -53,21 +53,41 @@ fn opcode(input: &[u8]) -> Result<OpCode> {
     map_opt(u8, OpCode::from_u8)(input)
 }
 
-type RawInstruction = u8;
-
 #[derive(Debug)]
-enum Instruction {
-    Block { typ: Value, expr: Vec<Instruction> },
+#[allow(dead_code)]
+pub enum Instruction {
+    Block {
+        typ: Value,
+        expr: Vec<Instruction>,
+    },
     End,
+    BrTable {
+        branch_ixs: Vec<u32>,
+        default_ix: u32,
+    },
+    Return,
     Select,
     LocalGet(u32),
-    I32Store { offset: u32, alignment: u32 },
+    LocalSet(u32),
+    I32Store {
+        offset: u32,
+        alignment: u32,
+    },
     I32Const(i32),
     Add,
 }
 
-fn ast(input: &[u8]) -> Result<Vec<Instruction>> {
-    terminated(many1(instruction), eof)(input)
+fn ast(mut input: &[u8]) -> Result<Vec<Instruction>> {
+    let mut output = Vec::new();
+    let mut instr;
+    loop {
+        (input, instr) = instruction(input)?;
+        if let Instruction::End = instr {
+            output.push(instr);
+            return Ok((input, output));
+        }
+        output.push(instr);
+    }
 }
 
 fn instruction(input: &[u8]) -> Result<Instruction> {
@@ -75,25 +95,34 @@ fn instruction(input: &[u8]) -> Result<Instruction> {
     use Instruction as I;
     use OpCode as O;
     let (input, op) = opcode(input)?;
-    // println!("{:?}", op);
-    match op {
+    // println!("raw: {:?}", op);
+    let op = match op {
         O::Block => {
             let (input, typ) = value(input)?;
-            let (input, raw) = raw_instructions(input)?;
-            let (_, mut expr) = ast(&raw)?;
-            expr.pop(); // remove 'End' instruction
+            let (input, expr) = ast(&input)?;
             Ok((input, I::Block { typ, expr }))
         }
         O::End => Ok((input, I::End)),
+        O::BrTable => map(
+            tuple((length_count(leb128_u32, leb128_u32), leb128_u32)),
+            |(branch_ixs, default_ix)| I::BrTable {
+                branch_ixs,
+                default_ix,
+            },
+        )(input),
+        O::Return => Ok((input, I::Return)),
         O::Select => Ok((input, I::Select)),
         O::LocalGet => map(leb128_u32, I::LocalGet)(input),
+        O::LocalSet => map(leb128_u32, I::LocalSet)(input),
         O::I32Store => map(tuple((leb128_u32, leb128_u32)), |(offset, alignment)| {
             I::I32Store { offset, alignment }
         })(input),
         O::I32Const => map(leb128_i32, I::I32Const)(input),
         O::Add => Ok((input, I::Add)),
-        _ => todo!(),
-    }
+        s => todo!("{s:?}"),
+    };
+    // println!("parsed: {:?}", op.as_ref().map(|v| &v.1).unwrap());
+    op
 }
 
 #[derive(Debug)]
@@ -149,23 +178,13 @@ fn mutability(input: &[u8]) -> Result<Mutability> {
 pub struct Global {
     pub typ: Value,
     pub mutable: Mutability,
-    pub expr: Vec<RawInstruction>,
-}
-
-fn raw_instructions(input: &[u8]) -> Result<&[RawInstruction]> {
-    recognize(tuple((take_until(&[0x0B][..]), u8)))(input)
+    pub expr: Vec<Instruction>,
 }
 
 fn global(input: &[u8]) -> Result<Global> {
-    let (input, (typ, mutable, expr)) = tuple((value, mutability, raw_instructions))(input)?;
-    Ok((
-        input,
-        Global {
-            typ,
-            mutable,
-            expr: expr.to_vec(),
-        },
-    ))
+    println!("{input:x?}");
+    let (input, (typ, mutable, expr)) = tuple((value, mutability, ast))(input)?;
+    Ok((input, Global { typ, mutable, expr }))
 }
 
 #[derive(Debug, num_derive::FromPrimitive, num_derive::ToPrimitive)]
@@ -216,20 +235,14 @@ fn export(input: &[u8]) -> Result<Export> {
 #[derive(Debug)]
 pub struct Code {
     pub locals: Vec<(u32, Value)>,
-    pub code: Vec<RawInstruction>,
+    pub code: Vec<Instruction>,
 }
 
 fn code(input: &[u8]) -> Result<Code> {
     let (input, _size) = leb128(input)?;
     let (input, locals) = length_count(leb128, tuple((map(leb128, |v| v as u32), value)))(input)?;
-    let (input, code) = raw_instructions(input)?;
-    Ok((
-        input,
-        Code {
-            locals,
-            code: code.to_vec(),
-        },
-    ))
+    let (input, code) = ast(input)?;
+    Ok((input, Code { locals, code }))
 }
 
 #[derive(Debug)]
@@ -278,18 +291,18 @@ fn func_sig(input: &[u8]) -> Result<FuncSig> {
 #[derive(Debug)]
 pub struct Data {
     pub mem_idx: u64,
-    pub offset: Vec<RawInstruction>,
+    pub offset: Vec<Instruction>,
     pub init: Vec<u8>,
 }
 
 fn data(input: &[u8]) -> Result<Data> {
-    let (input, (mem_idx, offset)) = tuple((map(u8, u64::from), raw_instructions))(input)?;
+    let (input, (mem_idx, offset)) = tuple((map(u8, u64::from), ast))(input)?;
     let (input, init) = length_data(leb128)(input)?;
     Ok((
         input,
         Data {
             mem_idx,
-            offset: offset.to_vec(),
+            offset,
             init: init.to_vec(),
         },
     ))
@@ -347,6 +360,7 @@ fn globals(input: &[u8]) -> Result<Vec<Global>> {
 fn section(input: &[u8]) -> Result<Section> {
     let (input, id) = map_opt(u8, SectionId::from_u8)(input)?;
     let (input, section_data) = length_data(leb128)(input)?;
+    println!("Segment: {id:?}");
 
     let section = match id {
         SectionId::Type => {
@@ -387,7 +401,7 @@ fn section(input: &[u8]) -> Result<Section> {
 
 fn binary(input: &[u8]) -> Result<Binary> {
     let (input, _) = tag(b"\0asm")(input)?;
-    let (input, version) = le_u32(input)?;
+    let (input, version) = the_u32(input)?;
     let (input, sections) = many1(section)(input)?;
     Ok((input, Binary { version, sections }))
 }
@@ -401,18 +415,19 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let code = std::fs::read(cli.file)?;
     let binary = parse_wasm(&code).map_err(|e| anyhow::format_err!("{:?}", e.code))?;
+    println!("{binary:?}");
 
-    for s in binary.sections {
-        match s {
-            Section::Code(codes) => {
-                for code in codes {
-                    let (_, code) = ast(&code.code).unwrap();
-                    println!("{:?}", code);
-                }
-            }
-            _ => {}
-        }
-    }
+    // for s in binary.sections {
+    //     match s {
+    //         Section::Code(codes) => {
+    //             for code in codes {
+    //                 let (_, code) = ast(&code.code).unwrap();
+    //                 println!("{:?}", code);
+    //             }
+    //         }
+    //         _ => {}
+    //     }
+    // }
 
     Ok(())
 }

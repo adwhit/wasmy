@@ -3,7 +3,7 @@
 // https://coinexsmartchain.medium.com/wasm-introduction-part-1-binary-format-57895d851580
 // https://webassembly.github.io/spec/core/
 
-use std::path::PathBuf;
+use std::{fmt::Display, path::PathBuf};
 
 use clap::Parser;
 
@@ -27,6 +27,50 @@ pub struct Binary {
     pub export: Vec<Export>,
     pub code: Vec<Code>,
     pub data: Vec<Data>,
+    pub names: Names,
+}
+
+impl Display for Binary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Binary:")?;
+        writeln!(f, "  Types:")?;
+        for typ in &self.types {
+            writeln!(f, "    {typ:?}")?;
+        }
+        writeln!(f, "  Functions:")?;
+        for func in &self.functions {
+            writeln!(f, "    {func:?}")?;
+        }
+        writeln!(f, "  Memory:")?;
+        for m in &self.memory {
+            writeln!(f, "    {m:?}")?;
+        }
+        writeln!(f, "  Globals:")?;
+        for g in &self.global {
+            writeln!(f, "    {g:?}")?;
+        }
+        writeln!(f, "  Exports:")?;
+        for e in &self.export {
+            writeln!(f, "    {e:?}")?;
+        }
+        writeln!(f, "  Code:")?;
+        for c in &self.code {
+            writeln!(f, "    locals: {:?}", c.locals)?;
+            writeln!(f, "    code:")?;
+            for i in &c.code {
+                writeln!(f, "      {i:?}")?;
+            }
+        }
+        writeln!(f, "  Data:")?;
+        for d in &self.data {
+            writeln!(f, "    {d:?}")?;
+        }
+        writeln!(f, "  Names:")?;
+        for (ix, n) in &self.names.func_names {
+            writeln!(f, "    {ix}: {n}")?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -128,6 +172,19 @@ pub struct Data {
     pub init: Vec<u8>,
 }
 
+#[derive(Debug, Default)]
+pub struct Names {
+    pub module_name: Option<String>,
+    pub func_names: Vec<(u32, String)>,
+}
+
+#[derive(Debug, num_derive::FromPrimitive, num_derive::ToPrimitive)]
+enum NameType {
+    Module = 0x0,
+    Function = 0x1,
+    Local = 0x2,
+}
+
 fn print_ast(code: &[Instruction]) {
     use Instruction::*;
 
@@ -184,14 +241,15 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let code = std::fs::read(cli.file)?;
     let binary = parse_wasm(&code).map_err(|e| anyhow::format_err!("{:?}", e.code))?;
-    println!("{binary:?}");
+    println!("{binary}");
 
     for code in &binary.code {
         println!("Function");
         print_ast(&code.code);
     }
 
-    interpreter::interpret(&binary, "tagliatelle")?;
+    // interpreter::interpret(&binary, "tagliatelle")?;
+    interpreter::interpret(&binary, "do_add")?;
 
     Ok(())
 }

@@ -2,17 +2,19 @@ use num_traits::FromPrimitive;
 
 use nom::{
     bytes::complete::{tag, take_while},
-    combinator::{eof, map, map_opt, map_res},
+    combinator::{eof, map, map_opt, map_res, opt},
     multi::{count, length_count, length_data, many1},
     number::complete::le_u32 as the_u32,
     number::complete::u8,
-    sequence::{terminated, tuple},
+    sequence::{preceded, terminated, tuple},
     Finish, IResult,
 };
 
 type Result<'a, T> = IResult<&'a [u8], T>;
 
-use crate::{Binary, Code, Data, Export, ExportType, FuncSig, Global, Limits, Mutability};
+use crate::{
+    Binary, Code, Data, Export, ExportType, FuncSig, Global, Limits, Mutability, NameType, Names,
+};
 
 use super::{Instruction, Value};
 
@@ -63,9 +65,9 @@ fn ast(mut input: &[u8]) -> Result<Vec<Instruction>> {
 }
 
 fn instruction(input: &[u8]) -> Result<Instruction> {
-    if !input.is_empty() {
-        println!("{:x?}", input[0])
-    }
+    // if !input.is_empty() {
+    //     println!("{:x?}", input[0])
+    // }
     use Instruction as I;
     use OpCode as O;
     let (input, op) = opcode(input)?;
@@ -156,8 +158,7 @@ fn export_type(input: &[u8]) -> Result<ExportType> {
 }
 
 fn export(input: &[u8]) -> Result<Export> {
-    let (input, slice) = map_res(length_data(leb128), std::str::from_utf8)(input)?;
-    let (input, (tag, index)) = tuple((export_type, leb128_u32))(input)?;
+    let (input, (slice, tag, index)) = tuple((str_slice, export_type, leb128_u32))(input)?;
     Ok((
         input,
         Export {
@@ -184,6 +185,7 @@ pub enum Section {
     Export(Vec<Export>),
     Code(Vec<Code>),
     Data(Vec<Data>),
+    Names(Names),
     Anon(AnonSection),
 }
 
@@ -258,6 +260,10 @@ fn leb128_i32(input: &[u8]) -> Result<i32> {
     Ok((input, unsafe { std::mem::transmute(val) }))
 }
 
+fn str_slice(input: &[u8]) -> Result<&str> {
+    map_res(length_data(leb128), std::str::from_utf8)(input)
+}
+
 fn function_sigs(input: &[u8]) -> Result<Vec<FuncSig>> {
     length_count(leb128, func_sig)(input)
 }
@@ -272,6 +278,31 @@ fn memory(input: &[u8]) -> Result<Vec<Limits>> {
 
 fn globals(input: &[u8]) -> Result<Vec<Global>> {
     length_count(leb128, global)(input)
+}
+
+fn namemap(input: &[u8]) -> Result<Vec<(u32, String)>> {
+    let (input, _size) = leb128_u32(input)?;
+    length_count(
+        leb128_u32,
+        tuple((leb128_u32, map(str_slice, String::from))),
+    )(input)
+}
+
+fn names(input: &[u8]) -> Result<Names> {
+    let (input, mod_name) = opt(preceded(tag([0x0]), str_slice))(input)?;
+    let (input, func_names) = opt(preceded(tag([0x1]), namemap))(input)?;
+
+    Ok((
+        input,
+        Names {
+            module_name: mod_name.map(String::from),
+            func_names: func_names.unwrap_or(vec![]),
+        },
+    ))
+}
+
+fn name_type(input: &[u8]) -> Result<NameType> {
+    map_opt(u8, NameType::from_u8)(input)
 }
 
 fn section(input: &[u8]) -> Result<Section> {
@@ -310,6 +341,16 @@ fn section(input: &[u8]) -> Result<Section> {
             let (_, data) = length_count(leb128, data)(section_data)?;
             Section::Data(data)
         }
+        SectionId::Custom => {
+            let (input, slice) = str_slice(section_data)?;
+            match slice {
+                "name" => {
+                    let (_, names) = names(input)?;
+                    Section::Names(names)
+                }
+                _ => todo!("{slice}"),
+            }
+        }
         _ => Section::Anon(AnonSection {
             id,
             data: section_data.to_vec(),
@@ -333,7 +374,10 @@ fn binary(input: &[u8]) -> Result<Binary> {
             Section::Export(s) => bin.export = s,
             Section::Code(s) => bin.code = s,
             Section::Data(s) => bin.data = s,
-            Section::Anon(_) => { /* TODO */ }
+            Section::Names(s) => bin.names = s,
+            Section::Anon(s) => {
+                println!("{s:?}")
+            }
         }
     }
     Ok((input, bin))

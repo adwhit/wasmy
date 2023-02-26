@@ -15,6 +15,7 @@ use parser::parse_wasm;
 #[derive(Parser)]
 struct Cli {
     file: PathBuf,
+    main: String,
 }
 
 #[derive(Debug, Default)]
@@ -135,6 +136,10 @@ pub enum Instruction {
         typ: Value,
         expr: Vec<Instruction>,
     },
+    Loop {
+        typ: Value,
+        expr: Vec<Instruction>,
+    },
     End,
     Br(u32),
     BrIf(u32),
@@ -176,13 +181,7 @@ pub struct Data {
 pub struct Names {
     pub module_name: Option<String>,
     pub func_names: Vec<(u32, String)>,
-}
-
-#[derive(Debug, num_derive::FromPrimitive, num_derive::ToPrimitive)]
-enum NameType {
-    Module = 0x0,
-    Function = 0x1,
-    Local = 0x2,
+    pub global_names: Vec<(u32, String)>,
 }
 
 fn print_ast(code: &[Instruction]) {
@@ -241,15 +240,15 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let code = std::fs::read(cli.file)?;
     let binary = parse_wasm(&code).map_err(|e| anyhow::format_err!("{:?}", e.code))?;
-    println!("{binary}");
+    // println!("{binary}");
 
-    for code in &binary.code {
-        println!("Function");
-        print_ast(&code.code);
-    }
+    // for code in &binary.code {
+    //     println!("Function");
+    //     print_ast(&code.code);
+    // }
 
     // interpreter::interpret(&binary, "tagliatelle")?;
-    interpreter::interpret(&binary, "do_add")?;
+    interpreter::interpret(&binary, &cli.main)?;
 
     Ok(())
 }

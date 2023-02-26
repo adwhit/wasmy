@@ -13,7 +13,16 @@ pub fn add(x: i32, y: i32) -> i32 {
 
 #[no_mangle]
 pub fn do_add() -> i32 {
-    add(3, 5)
+    add(add(add(add(1, 3), 5), 7), 9)
+}
+
+#[no_mangle]
+pub fn loop_add() -> i32 {
+    let mut inc = 0;
+    for _ in 0..500 {
+        inc = add(inc, 1);
+    }
+    inc
 }
 
 #[no_mangle]

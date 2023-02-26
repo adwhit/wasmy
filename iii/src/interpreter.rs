@@ -37,7 +37,7 @@ pub fn interpret(binary: &Binary, main: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct State {
     stack: Vec<i32>,
     locals: Vec<i32>,
@@ -60,6 +60,9 @@ impl State {
     fn try_pop(&mut self) -> Option<i32> {
         self.stack.pop()
     }
+    fn peek(&mut self) -> i32 {
+        *self.stack.last().unwrap()
+    }
     fn get_local(&self, ix: u32) -> i32 {
         self.locals[ix as usize]
     }
@@ -73,13 +76,28 @@ struct Branch(u32);
 fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Branch> {
     use Instruction::*;
     for i in code {
-        println!("exec: {i:?}");
+        // println!("exec: {i:?}");
         match i {
             Block { typ, expr } => match exec(binary, state, expr) {
                 Some(Branch(0)) | None => {}
                 Some(Branch(v)) => return Some(Branch(v - 1)),
             },
+            Loop { typ, expr } => {
+                loop {
+                    match exec(binary, state, expr) {
+                        None => break,                                 // exit the loop
+                        Some(Branch(0)) => {}                          // repeat the loop
+                        Some(Branch(v)) => return Some(Branch(v - 1)), // branch outside the loop
+                    }
+                }
+            }
             End => { /* Do nothing? */ }
+            BrIf(ix) => {
+                let val = state.pop();
+                if val != 0 {
+                    return Some(Branch(*ix));
+                }
+            }
             BrTable {
                 branch_ixs,
                 default_ix,
@@ -107,11 +125,16 @@ fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Bran
                     args.push(0);
                 }
 
-                let mut new_state = State::default();
-                new_state.locals = args;
-                exec(binary, &mut new_state, &func_code.code);
-                todo!()
-                // if func_sig.results
+                // println!("before call: {state:?}");
+                // swap out the locals prior to function call
+                // the stack stays the same
+                std::mem::swap(&mut state.locals, &mut args);
+
+                exec(binary, state, &func_code.code);
+
+                // restore the curent frame's locals
+                std::mem::swap(&mut state.locals, &mut args);
+                // println!("after call: {state:?}");
             }
             Select => todo!(),
             LocalGet(ix) => {
@@ -119,14 +142,24 @@ fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Bran
             }
             LocalSet(ix) => {
                 let val = state.pop();
+                // println!("set local {ix} to {val}");
+                state.set_local(*ix, val);
+            }
+            LocalTee(ix) => {
+                let val = state.peek();
+                // println!("tee local {ix} to {val}");
                 state.set_local(*ix, val);
             }
             GlobalGet(ix) => todo!(),
             GlobalSet(ix) => todo!(),
-            I32Const(val) => state.push(*val),
+            I32Const(val) => {
+                // println!("const {val}");
+                state.push(*val);
+            }
             Add => {
                 let val1 = state.pop();
                 let val2 = state.pop();
+                // println!("add {val1} + {val2}");
                 state.push(val1 + val2);
             }
             other => todo!("interpreter {other:?}"),

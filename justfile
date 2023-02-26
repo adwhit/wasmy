@@ -1,6 +1,6 @@
 
-run:
-    cargo run --bin iii demo/target/wasm32-unknown-unknown/release/demo.wasm
+run opt="":
+    cargo run --bin iii {{opt}} demo/target/wasm32-unknown-unknown/release/demo.wasm loop_add
 
 
 build:

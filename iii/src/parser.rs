@@ -12,9 +12,7 @@ use nom::{
 
 type Result<'a, T> = IResult<&'a [u8], T>;
 
-use crate::{
-    Binary, Code, Data, Export, ExportType, FuncSig, Global, Limits, Mutability, NameType, Names,
-};
+use crate::{Binary, Code, Data, Export, ExportType, FuncSig, Global, Limits, Mutability, Names};
 
 use super::{Instruction, Value};
 
@@ -77,6 +75,11 @@ fn instruction(input: &[u8]) -> Result<Instruction> {
             let (input, typ) = value(input)?;
             let (input, expr) = ast(&input)?;
             Ok((input, I::Block { typ, expr }))
+        }
+        O::Loop => {
+            let (input, typ) = value(input)?;
+            let (input, expr) = ast(&input)?;
+            Ok((input, I::Loop { typ, expr }))
         }
         O::End => Ok((input, I::End)),
         O::Br => map(leb128_u32, I::Br)(input),
@@ -229,7 +232,7 @@ fn data(input: &[u8]) -> Result<Data> {
 
 const MASK: u8 = 0b01111111;
 
-// todo handle overflows
+// TODO handle overflows
 fn leb128(input: &[u8]) -> Result<u64> {
     let (input, parts) = take_while(|v| v >> 7 == 1u8)(input)?;
     let (input, v2) = u8(input)?;
@@ -250,14 +253,24 @@ fn leb128_u32(input: &[u8]) -> Result<u32> {
     Ok((input, val))
 }
 
-fn leb128_i32(input: &[u8]) -> Result<i32> {
-    let (input, parts) = take_while(|v| v >> 7 == 1u8)(input)?;
-    let (input, v2) = u8(input)?;
-    let mut val = (v2 as u32) << (7 * parts.len());
-    for (ix, v) in parts.iter().enumerate() {
-        val += ((MASK & v) as u32) << (ix * 7)
+fn leb128_i32(mut input: &[u8]) -> Result<i32> {
+    let mut result = 0;
+    let mut shift = 0;
+    let mut byte;
+    let size = 32;
+    loop {
+        (input, byte) = u8(input)?;
+        result |= ((MASK & byte) as u32) << shift;
+        shift += 7;
+        if byte >> 7 == 0 {
+            break;
+        }
     }
-    Ok((input, unsafe { std::mem::transmute(val) }))
+    if (shift < size) && (0x40 & byte != 0) {
+        // sign-extend
+        result |= !0 << shift;
+    }
+    Ok((input, unsafe { std::mem::transmute(result) }))
 }
 
 fn str_slice(input: &[u8]) -> Result<&str> {
@@ -291,18 +304,16 @@ fn namemap(input: &[u8]) -> Result<Vec<(u32, String)>> {
 fn names(input: &[u8]) -> Result<Names> {
     let (input, mod_name) = opt(preceded(tag([0x0]), str_slice))(input)?;
     let (input, func_names) = opt(preceded(tag([0x1]), namemap))(input)?;
+    let (input, global_names) = opt(preceded(tag([0x7]), namemap))(input)?;
 
     Ok((
         input,
         Names {
             module_name: mod_name.map(String::from),
             func_names: func_names.unwrap_or(vec![]),
+            global_names: global_names.unwrap_or(vec![]),
         },
     ))
-}
-
-fn name_type(input: &[u8]) -> Result<NameType> {
-    map_opt(u8, NameType::from_u8)(input)
 }
 
 fn section(input: &[u8]) -> Result<Section> {
@@ -386,4 +397,27 @@ fn binary(input: &[u8]) -> Result<Binary> {
 pub fn parse_wasm(input: &[u8]) -> anyhow::Result<Binary, nom::error::Error<&[u8]>> {
     let (_, out) = terminated(binary, eof)(input).finish()?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_parse_u32() {
+        let input = &[0xE5, 0x8E, 0x26];
+        assert_eq!(leb128_u32(input).unwrap(), (&[][..], 624485));
+    }
+
+    #[test]
+    fn test_parse_i32() {
+        let input = &[0x00];
+        assert_eq!(leb128_i32(input).unwrap(), (&[][..], 0));
+
+        let input = &[0x01];
+        assert_eq!(leb128_i32(input).unwrap(), (&[][..], 1));
+
+        let input = &[0xC0, 0xBB, 0x78];
+        assert_eq!(leb128_i32(input).unwrap(), (&[][..], -123456));
+    }
 }

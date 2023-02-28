@@ -1,4 +1,4 @@
-use std::{collections::HashMap};
+use std::collections::HashMap;
 
 use crate::{ExportType, Instruction};
 use anyhow::bail;
@@ -220,14 +220,20 @@ fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Bran
                 let val = state.pop();
                 state.set_global(*ix, val);
             }
-            I32Store { offset, alignment: _ } => {
+            I32Store {
+                offset,
+                alignment: _,
+            } => {
                 let val = state.pop();
                 let base_loc = state.pop();
                 let loc = (base_loc + *offset as i32) as usize;
                 let bytes: [u8; 4] = unsafe { std::mem::transmute(val) };
                 state.memory[loc..loc + 4].copy_from_slice(&bytes);
             }
-            I32Load { offset, alignment: _ } => {
+            I32Load {
+                offset,
+                alignment: _,
+            } => {
                 let base_loc = state.pop();
                 let loc = (base_loc + *offset as i32) as usize;
                 let slice: &[u8] = &state.memory[loc..loc + 4];

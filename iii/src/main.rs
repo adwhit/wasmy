@@ -194,13 +194,19 @@ pub enum UnOp {
 #[derive(Debug)]
 pub enum BinOp {
     Add,
+    And,
     Sub,
     Lt,
     LtU,
+    Eq,
     Gt,
     Ge,
+    GeU,
     Or,
+    Xor,
     Shl,
+    Shr,
+    ShrU,
 }
 
 #[derive(Debug)]
@@ -249,12 +255,14 @@ fn print_ast(code: &[Instruction]) {
                 GlobalGet(ix) => print_indent(&format!("(global_get ${ix})"), *depth),
                 GlobalSet(ix) => print_indent(&format!("(global_set ${ix})"), *depth),
                 I32Const(c) => print_indent(&format!("(i32_const {c})"), *depth),
-                I32Load { offset, alignment: _ } => {
-                    print_indent(&format!("(i32_load {offset})"), *depth)
-                }
-                I32Store { offset, alignment: _ } => {
-                    print_indent(&format!("(i32_store {offset})"), *depth)
-                }
+                I32Load {
+                    offset,
+                    alignment: _,
+                } => print_indent(&format!("(i32_load {offset})"), *depth),
+                I32Store {
+                    offset,
+                    alignment: _,
+                } => print_indent(&format!("(i32_store {offset})"), *depth),
                 UnOp(op) => print_indent(&format!("({op:?})"), *depth),
                 BinOp(op) => print_indent(&format!("({op:?})"), *depth),
                 _other => print_indent("(inst)", *depth),

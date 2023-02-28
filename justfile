@@ -1,17 +1,20 @@
+blob := "demo/target/wasm32-unknown-unknown/release/demo.wasm"
 
 run opt="":
-    cargo run --bin iii {{opt}} demo/target/wasm32-unknown-unknown/release/demo.wasm loop_add
+    cargo run --bin iii {{opt}} {{blob}} exec whatcha_get
 
+show:
+    cargo run --bin iii {{blob}} show
 
 build:
     cd demo && cargo build --target wasm32-unknown-unknown --release
     cargo build
 
 dis:
-    wasm-dis demo/target/wasm32-unknown-unknown/release/demo.wasm
+    wasm-dis {{blob}}
 
 dump:
-    xxd demo/target/wasm32-unknown-unknown/release/demo.wasm
+    xxd {{blob}}
 
 clean:
     cargo clean

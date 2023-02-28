@@ -305,6 +305,7 @@ fn names(input: &[u8]) -> Result<Names> {
     let (input, mod_name) = opt(preceded(tag([0x0]), str_slice))(input)?;
     let (input, func_names) = opt(preceded(tag([0x1]), namemap))(input)?;
     let (input, global_names) = opt(preceded(tag([0x7]), namemap))(input)?;
+    let (input, data_names) = opt(preceded(tag([0x9]), namemap))(input)?;
 
     Ok((
         input,
@@ -312,6 +313,7 @@ fn names(input: &[u8]) -> Result<Names> {
             module_name: mod_name.map(String::from),
             func_names: func_names.unwrap_or(vec![]),
             global_names: global_names.unwrap_or(vec![]),
+            data_names: data_names.unwrap_or(vec![]),
         },
     ))
 }

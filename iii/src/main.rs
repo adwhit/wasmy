@@ -15,7 +15,14 @@ use parser::parse_wasm;
 #[derive(Parser)]
 struct Cli {
     file: PathBuf,
-    main: String,
+    #[command(subcommand)]
+    action: Action,
+}
+
+#[derive(clap::Subcommand)]
+enum Action {
+    Exec { main: String },
+    Show,
 }
 
 #[derive(Debug, Default)]
@@ -66,8 +73,16 @@ impl Display for Binary {
         for d in &self.data {
             writeln!(f, "    {d:?}")?;
         }
-        writeln!(f, "  Names:")?;
+        writeln!(f, "  Func Names:")?;
         for (ix, n) in &self.names.func_names {
+            writeln!(f, "    {ix}: {n}")?;
+        }
+        writeln!(f, "  Global Names:")?;
+        for (ix, n) in &self.names.global_names {
+            writeln!(f, "    {ix}: {n}")?;
+        }
+        writeln!(f, "  Data Names:")?;
+        for (ix, n) in &self.names.data_names {
             writeln!(f, "    {ix}: {n}")?;
         }
         Ok(())
@@ -182,6 +197,7 @@ pub struct Names {
     pub module_name: Option<String>,
     pub func_names: Vec<(u32, String)>,
     pub global_names: Vec<(u32, String)>,
+    pub data_names: Vec<(u32, String)>,
 }
 
 fn print_ast(code: &[Instruction]) {
@@ -240,7 +256,14 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let code = std::fs::read(cli.file)?;
     let binary = parse_wasm(&code).map_err(|e| anyhow::format_err!("{:?}", e.code))?;
-    // println!("{binary}");
+    match cli.action {
+        Action::Show => {
+            println!("{binary}");
+        }
+        Action::Exec { main } => {
+            interpreter::interpret(&binary, &main)?;
+        }
+    }
 
     // for code in &binary.code {
     //     println!("Function");
@@ -248,7 +271,6 @@ fn main() -> anyhow::Result<()> {
     // }
 
     // interpreter::interpret(&binary, "tagliatelle")?;
-    interpreter::interpret(&binary, &cli.main)?;
 
     Ok(())
 }

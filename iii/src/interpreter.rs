@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
 
 use crate::{Export, ExportType, Instruction};
 use anyhow::bail;
@@ -26,7 +26,19 @@ pub fn interpret(binary: &Binary, main: &str) -> anyhow::Result<()> {
 
     let n_locals =
         func_sig.params.len() + code.locals.iter().fold(0u32, |acc, (ct, _)| acc + ct) as usize;
-    let mut state = State::with_n_locals(n_locals);
+    let globals = binary
+        .global
+        .iter()
+        .map(|g| {
+            let mut fake_state = State::new();
+            exec(binary, &mut fake_state, &g.expr);
+            fake_state.pop()
+        })
+        .collect();
+
+    let mut state = State::new();
+    state.locals.push(vec![0; n_locals]);
+    state.globals = globals;
 
     exec(binary, &mut state, &code.code);
 
@@ -34,23 +46,43 @@ pub fn interpret(binary: &Binary, main: &str) -> anyhow::Result<()> {
         println!("Value on stack: {v}")
     }
 
+    println!("{state:?}");
+
     Ok(())
 }
 
-#[derive(Default, Debug)]
+#[derive(custom_debug::Debug)]
 struct State {
     stack: Vec<i32>,
-    locals: Vec<i32>,
+    locals: Vec<Vec<i32>>,
+    globals: Vec<i32>,
+    #[debug(with = "hex_fmt")]
+    memory: Vec<u8>,
+}
+
+fn hex_fmt(n: &Vec<u8>, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    let mut max_nonzero = 0;
+    for (ix, val) in n.iter().enumerate() {
+        if *val != 0 {
+            max_nonzero = ix + 1;
+        }
+    }
+    if max_nonzero % 8 != 0 {
+        max_nonzero += 8 - (max_nonzero % 8);
+    }
+    write!(f, "{:x?}", &n[..max_nonzero])?;
+    Ok(())
 }
 
 impl State {
-    fn with_n_locals(n: usize) -> Self {
+    fn new() -> Self {
         Self {
             stack: vec![],
-            locals: vec![0; n],
+            locals: vec![],
+            globals: vec![],
+            memory: vec![0; 64 * 1024],
         }
     }
-
     fn push(&mut self, v: i32) {
         self.stack.push(v)
     }
@@ -64,10 +96,16 @@ impl State {
         *self.stack.last().unwrap()
     }
     fn get_local(&self, ix: u32) -> i32 {
-        self.locals[ix as usize]
+        self.locals.last().unwrap()[ix as usize]
     }
     fn set_local(&mut self, ix: u32, val: i32) {
-        self.locals[ix as usize] = val;
+        self.locals.last_mut().unwrap()[ix as usize] = val;
+    }
+    fn get_global(&self, ix: u32) -> i32 {
+        self.globals[ix as usize]
+    }
+    fn set_global(&mut self, ix: u32, val: i32) {
+        self.globals[ix as usize] = val;
     }
 }
 
@@ -125,18 +163,23 @@ fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Bran
                     args.push(0);
                 }
 
-                // println!("before call: {state:?}");
-                // swap out the locals prior to function call
-                // the stack stays the same
-                std::mem::swap(&mut state.locals, &mut args);
-
+                // push the new frame's locals
+                state.locals.push(args);
+                // call
                 exec(binary, state, &func_code.code);
-
                 // restore the curent frame's locals
-                std::mem::swap(&mut state.locals, &mut args);
-                // println!("after call: {state:?}");
+                state.locals.pop().unwrap();
             }
-            Select => todo!(),
+            Select => {
+                let sel = state.pop();
+                let c2 = state.pop();
+                let c1 = state.pop();
+                if sel != 0 {
+                    state.push(c1)
+                } else {
+                    state.push(c2)
+                }
+            }
             LocalGet(ix) => {
                 state.push(state.get_local(*ix));
             }
@@ -150,10 +193,30 @@ fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Bran
                 // println!("tee local {ix} to {val}");
                 state.set_local(*ix, val);
             }
-            GlobalGet(ix) => todo!(),
-            GlobalSet(ix) => todo!(),
+            GlobalGet(ix) => {
+                state.push(state.get_global(*ix));
+            }
+            GlobalSet(ix) => {
+                let val = state.pop();
+                state.set_global(*ix, val);
+            }
+            I32Store { offset, alignment } => {
+                let val = state.pop();
+                let base_loc = state.pop();
+                let loc = (base_loc + *offset as i32) as usize;
+                let bytes: [u8; 4] = unsafe { std::mem::transmute(val) };
+                state.memory[loc..loc + 4].copy_from_slice(&bytes);
+            }
+            I32Load { offset, alignment } => {
+                let base_loc = state.pop();
+                let loc = (base_loc + *offset as i32) as usize;
+                println!("{base_loc}");
+                let slice: &[u8] = &state.memory[loc..loc + 4];
+                let arr: [u8; 4] = slice.try_into().unwrap();
+                let val: i32 = unsafe { std::mem::transmute(arr) };
+                state.push(val);
+            }
             I32Const(val) => {
-                // println!("const {val}");
                 state.push(*val);
             }
             Add => {
@@ -161,6 +224,21 @@ fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Bran
                 let val2 = state.pop();
                 // println!("add {val1} + {val2}");
                 state.push(val1 + val2);
+            }
+            Sub => {
+                let val2 = state.pop();
+                let val1 = state.pop();
+                state.push(val1 - val2);
+            }
+            Ge => {
+                let val2 = state.pop();
+                let val1 = state.pop();
+                state.push(if val1 >= val2 { 1 } else { 0 });
+            }
+            Gt => {
+                let val2 = state.pop();
+                let val1 = state.pop();
+                state.push(if val1 > val2 { 1 } else { 0 });
             }
             other => todo!("interpreter {other:?}"),
         }

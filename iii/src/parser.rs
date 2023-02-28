@@ -13,12 +13,13 @@ use nom::{
 type Result<'a, T> = IResult<&'a [u8], T>;
 
 use crate::{
-    BinOp, Binary, Code, Data, Export, ExportType, FuncSig, Global, Limits, Mutability, Names, UnOp,
+    BinOp, Binary, Code, Data, Export, ExportType, FuncSig, Global, Limits, MemOp, Mutability,
+    Names, UnOp,
 };
 
 use super::{Instruction, Value};
 
-#[derive(Debug, num_derive::FromPrimitive, num_derive::ToPrimitive)]
+#[derive(Debug, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 pub enum OpCode {
     Unreachable = 0x00,
     NoOp = 0x01,
@@ -32,6 +33,7 @@ pub enum OpCode {
     BrTable = 0x0E,
     Return = 0x0F,
     Call = 0x10,
+    CallIndirect = 0x11,
     Drop = 0x1A,
     Select = 0x1B,
     LocalGet = 0x20,
@@ -40,24 +42,41 @@ pub enum OpCode {
     GlobalGet = 0x23,
     GlobalSet = 0x24,
     I32Load = 0x28,
+    I64Load = 0x29,
+    I32Load8 = 0x2c,
+    I32Load8U = 0x2d,
+    I64Load32 = 0x34,
+    I64Load32U = 0x35,
     I32Store = 0x36,
+    I64Store = 0x37,
+    I32Store8 = 0x3a,
+    MemoryGrow = 0x40,
     I32Const = 0x41,
     I64Const = 0x42,
     Eqz = 0x45,
     Eq = 0x46,
+    Neq = 0x47,
     Lt = 0x48,
     LtU = 0x49,
-    Gt = 0x4b,
+    Gt = 0x4a,
+    GtU = 0x4b,
+    Le = 0x4c,
+    LeU = 0x4d,
     Ge = 0x4e,
     GeU = 0x4f,
     Add = 0x6a,
     Sub = 0x6b,
+    Mul = 0x6c,
+    Clz = 0x67,
+    Ctz = 0x68,
     And = 0x71,
     Or = 0x72,
     Xor = 0x73,
     Shl = 0x74,
     Shr = 0x75,
     ShrU = 0x76,
+    Rotl = 0x77,
+    Rotr = 0x78,
 }
 
 fn opcode(input: &[u8]) -> Result<OpCode> {
@@ -110,22 +129,39 @@ fn instruction(input: &[u8]) -> Result<Instruction> {
         )(input),
         O::Return => Ok((input, I::Return)),
         O::Call => map(leb128_u32, I::Call)(input),
+        O::CallIndirect => map(terminated(leb128_u32, tag(&[0x00])), I::CallIndirect)(input),
+        O::Drop => Ok((input, I::Drop)),
         O::Select => Ok((input, I::Select)),
         O::LocalGet => map(leb128_u32, I::LocalGet)(input),
         O::LocalSet => map(leb128_u32, I::LocalSet)(input),
         O::LocalTee => map(leb128_u32, I::LocalTee)(input),
         O::GlobalGet => map(leb128_u32, I::GlobalGet)(input),
         O::GlobalSet => map(leb128_u32, I::GlobalSet)(input),
-        O::I32Store => map(tuple((leb128_u32, leb128_u32)), |(offset, alignment)| {
-            I::I32Store { offset, alignment }
+        O::I32Store
+        | O::I64Store
+        | O::I32Store8
+        | O::I32Load
+        | O::I64Load
+        | O::I32Load8
+        | O::I32Load8U
+        | O::I64Load32
+        | O::I64Load32U => map(tuple((leb128_u32, leb128_u32)), |(offset, alignment)| {
+            I::MemOp {
+                offset,
+                alignment,
+                op: MemOp::try_from(op).unwrap(),
+            }
         })(input),
-        O::I32Load => map(tuple((leb128_u32, leb128_u32)), |(offset, alignment)| {
-            I::I32Load { offset, alignment }
-        })(input),
+        O::MemoryGrow => Ok((input, I::MemoryGrow)),
         O::I32Const => map(leb128_i32, I::I32Const)(input),
         O::I64Const => map(leb128_i64, I::I64Const)(input),
+
         O::Eqz => Ok((input, I::UnOp(UnOp::Eqz))),
+        O::Ctz => Ok((input, I::UnOp(UnOp::Ctz))),
+        O::Clz => Ok((input, I::UnOp(UnOp::Clz))),
+
         O::Gt => Ok((input, I::BinOp(BinOp::Gt))),
+        O::GtU => Ok((input, I::BinOp(BinOp::GtU))),
         O::Ge => Ok((input, I::BinOp(BinOp::Ge))),
         O::GeU => Ok((input, I::BinOp(BinOp::GeU))),
         O::Add => Ok((input, I::BinOp(BinOp::Add))),
@@ -134,15 +170,40 @@ fn instruction(input: &[u8]) -> Result<Instruction> {
         O::Shl => Ok((input, I::BinOp(BinOp::Shl))),
         O::Shr => Ok((input, I::BinOp(BinOp::Shr))),
         O::ShrU => Ok((input, I::BinOp(BinOp::ShrU))),
+        O::Le => Ok((input, I::BinOp(BinOp::Le))),
+        O::LeU => Ok((input, I::BinOp(BinOp::LeU))),
         O::Lt => Ok((input, I::BinOp(BinOp::Lt))),
+        O::Mul => Ok((input, I::BinOp(BinOp::Mul))),
         O::Eq => Ok((input, I::BinOp(BinOp::Eq))),
+        O::Neq => Ok((input, I::BinOp(BinOp::Neq))),
         O::LtU => Ok((input, I::BinOp(BinOp::LtU))),
         O::Or => Ok((input, I::BinOp(BinOp::Or))),
         O::Xor => Ok((input, I::BinOp(BinOp::Xor))),
+        O::Rotl => Ok((input, I::BinOp(BinOp::Rotl))),
+        O::Rotr => Ok((input, I::BinOp(BinOp::Rotr))),
+
         s => todo!("{s:?}"),
     };
     // println!("parsed: {:?}", op.as_ref().map(|v| &v.1).unwrap());
     op
+}
+
+impl TryFrom<OpCode> for MemOp {
+    type Error = ();
+    fn try_from(value: OpCode) -> std::result::Result<Self, Self::Error> {
+        let ok = match value {
+            OpCode::I32Load => MemOp::I32Load,
+            OpCode::I64Load => MemOp::I64Load,
+            OpCode::I32Load8 => MemOp::I32Load8,
+            OpCode::I32Load8U => MemOp::I32Load8U,
+            OpCode::I32Store => MemOp::I32Store,
+            OpCode::I64Store => MemOp::I64Store,
+            OpCode::I64Load32U => MemOp::I64Load32U,
+            OpCode::I32Store8 => MemOp::I32Store8,
+            _ => return Err(()),
+        };
+        Ok(ok)
+    }
 }
 
 #[derive(Debug)]

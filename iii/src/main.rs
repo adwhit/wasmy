@@ -166,19 +166,19 @@ pub enum Instruction {
     },
     Return,
     Call(u32),
+    CallIndirect(u32),
+    Drop,
     Select,
     LocalGet(u32),
     LocalSet(u32),
     LocalTee(u32),
     GlobalGet(u32),
     GlobalSet(u32),
-    I32Load {
+    MemoryGrow,
+    MemOp {
         offset: u32,
         alignment: u32,
-    },
-    I32Store {
-        offset: u32,
-        alignment: u32,
+        op: MemOp,
     },
     I32Const(i32),
     I64Const(i64),
@@ -189,6 +189,8 @@ pub enum Instruction {
 #[derive(Debug)]
 pub enum UnOp {
     Eqz,
+    Ctz,
+    Clz,
 }
 
 #[derive(Debug)]
@@ -196,17 +198,37 @@ pub enum BinOp {
     Add,
     And,
     Sub,
+    Le,
+    LeU,
     Lt,
     LtU,
     Eq,
+    Neq,
     Gt,
+    GtU,
     Ge,
     GeU,
+    Mul,
     Or,
     Xor,
+    Rotl,
+    Rotr,
     Shl,
     Shr,
     ShrU,
+}
+
+#[derive(Debug)]
+pub enum MemOp {
+    I32Load,
+    I64Load,
+    I32Store,
+    I64Store,
+    I32Store8,
+    I32Load8,
+    I32Load8U,
+    I64Load32,
+    I64Load32U,
 }
 
 #[derive(Debug)]
@@ -255,14 +277,11 @@ fn print_ast(code: &[Instruction]) {
                 GlobalGet(ix) => print_indent(&format!("(global_get ${ix})"), *depth),
                 GlobalSet(ix) => print_indent(&format!("(global_set ${ix})"), *depth),
                 I32Const(c) => print_indent(&format!("(i32_const {c})"), *depth),
-                I32Load {
+                MemOp {
                     offset,
                     alignment: _,
-                } => print_indent(&format!("(i32_load {offset})"), *depth),
-                I32Store {
-                    offset,
-                    alignment: _,
-                } => print_indent(&format!("(i32_store {offset})"), *depth),
+                    op,
+                } => print_indent(&format!("({op:?} {offset})"), *depth),
                 UnOp(op) => print_indent(&format!("({op:?})"), *depth),
                 BinOp(op) => print_indent(&format!("({op:?})"), *depth),
                 _other => print_indent("(inst)", *depth),

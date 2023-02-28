@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{ExportType, Instruction};
+use crate::{ExportType, Instruction, MemOp};
 use anyhow::bail;
 
 use super::Binary;
@@ -220,30 +220,28 @@ fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Bran
                 let val = state.pop();
                 state.set_global(*ix, val);
             }
-            I32Store {
+            MemOp {
                 offset,
                 alignment: _,
-            } => {
-                let val = state.pop();
-                let base_loc = state.pop();
-                let loc = (base_loc + *offset as i32) as usize;
-                let bytes: [u8; 4] = unsafe { std::mem::transmute(val) };
-                state.memory[loc..loc + 4].copy_from_slice(&bytes);
-            }
-            I32Load {
-                offset,
-                alignment: _,
-            } => {
-                let base_loc = state.pop();
-                let loc = (base_loc + *offset as i32) as usize;
-                let slice: &[u8] = &state.memory[loc..loc + 4];
-                let arr: [u8; 4] = slice.try_into().unwrap();
-                let val: i32 = unsafe { std::mem::transmute(arr) };
-                state.push(val);
-            }
-            I32Const(val) => {
-                state.push(*val);
-            }
+                op,
+            } => match op {
+                crate::MemOp::I32Store => {
+                    let val = state.pop();
+                    let base_loc = state.pop();
+                    let loc = (base_loc + *offset as i32) as usize;
+                    let bytes: [u8; 4] = unsafe { std::mem::transmute(val) };
+                    state.memory[loc..loc + 4].copy_from_slice(&bytes);
+                }
+                crate::MemOp::I32Load => {
+                    let base_loc = state.pop();
+                    let loc = (base_loc + *offset as i32) as usize;
+                    let slice: &[u8] = &state.memory[loc..loc + 4];
+                    let arr: [u8; 4] = slice.try_into().unwrap();
+                    let val: i32 = unsafe { std::mem::transmute(arr) };
+                    state.push(val);
+                }
+                _ => todo!("{i:?}"),
+            },
             BinOp(op) => {
                 let val2 = state.pop();
                 let val1 = state.pop();

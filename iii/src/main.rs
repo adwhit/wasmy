@@ -264,13 +264,5 @@ fn main() -> anyhow::Result<()> {
             interpreter::interpret(&binary, &main)?;
         }
     }
-
-    // for code in &binary.code {
-    //     println!("Function");
-    //     print_ast(&code.code);
-    // }
-
-    // interpreter::interpret(&binary, "tagliatelle")?;
-
     Ok(())
 }

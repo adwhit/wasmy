@@ -1,7 +1,7 @@
 blob := "demo/target/wasm32-unknown-unknown/release/demo.wasm"
 
-run opt="":
-    cargo run --bin iii {{opt}} {{blob}} exec whatcha_get
+exec func="whatcha_get" opt="":
+    cargo run --bin iii {{opt}} {{blob}} exec {{func}}
 
 show:
     cargo run --bin iii {{blob}} show

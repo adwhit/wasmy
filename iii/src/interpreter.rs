@@ -40,6 +40,19 @@ pub fn interpret(binary: &Binary, main: &str) -> anyhow::Result<()> {
     state.locals.push(vec![0; n_locals]);
     state.globals = globals;
 
+    for d in &binary.data {
+        let offset = {
+            let mut fake_state = State::new();
+            exec(binary, &mut fake_state, &d.offset);
+            fake_state.pop() as usize
+        };
+        let extent = offset + d.init.len();
+        if state.memory.len() < extent {
+            state.memory.resize(extent, 0);
+        }
+        state.memory[offset..].copy_from_slice(&d.init);
+    }
+
     exec(binary, &mut state, &code.code);
 
     while let Some(v) = state.try_pop() {
@@ -62,7 +75,7 @@ struct State {
 
 fn hex_fmt(n: &Vec<u8>, f: &mut std::fmt::Formatter) -> std::fmt::Result {
     let mut max_nonzero = 0;
-    for (ix, val) in n.iter().enumerate() {
+    for (ix, val) in n.iter().enumerate().take(100) {
         if *val != 0 {
             max_nonzero = ix + 1;
         }
@@ -210,7 +223,6 @@ fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Bran
             I32Load { offset, alignment } => {
                 let base_loc = state.pop();
                 let loc = (base_loc + *offset as i32) as usize;
-                println!("{base_loc}");
                 let slice: &[u8] = &state.memory[loc..loc + 4];
                 let arr: [u8; 4] = slice.try_into().unwrap();
                 let val: i32 = unsafe { std::mem::transmute(arr) };

@@ -147,6 +147,8 @@ pub enum Mutability {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum Instruction {
+    Unreachable,
+    NoOp,
     Block {
         typ: Value,
         expr: Vec<Instruction>,
@@ -179,10 +181,26 @@ pub enum Instruction {
         alignment: u32,
     },
     I32Const(i32),
+    I64Const(i64),
+    UnOp(UnOp),
+    BinOp(BinOp),
+}
+
+#[derive(Debug)]
+pub enum UnOp {
+    Eqz,
+}
+
+#[derive(Debug)]
+pub enum BinOp {
     Add,
     Sub,
+    Lt,
+    LtU,
     Gt,
     Ge,
+    Or,
+    Shl,
 }
 
 #[derive(Debug)]
@@ -206,7 +224,7 @@ fn print_ast(code: &[Instruction]) {
     fn inner(code: &[Instruction], depth: &mut usize) {
         for c in code {
             match c {
-                Block { typ, expr } => {
+                Block { typ: _, expr } => {
                     print_indent("(block", *depth);
                     *depth += 1;
                     inner(expr, depth);
@@ -217,29 +235,28 @@ fn print_ast(code: &[Instruction]) {
                     }
                     print_indent(")", *depth)
                 }
-                Br(val) => print_indent("(br)", *depth),
-                BrIf(val) => print_indent("(br_if)", *depth),
+                Br(_val) => print_indent("(br)", *depth),
+                BrIf(_val) => print_indent("(br_if)", *depth),
                 BrTable {
-                    branch_ixs,
-                    default_ix,
+                    branch_ixs: _,
+                    default_ix: _,
                 } => print_indent("(br_table)", *depth),
                 Return => print_indent("(return)", *depth),
-                Call(ix) => print_indent("(call)", *depth),
+                Call(_ix) => print_indent("(call)", *depth),
                 Select => print_indent("(select)", *depth),
                 LocalGet(ix) => print_indent(&format!("(local_get ${ix})"), *depth),
                 LocalSet(ix) => print_indent(&format!("(local_set ${ix})"), *depth),
                 GlobalGet(ix) => print_indent(&format!("(global_get ${ix})"), *depth),
                 GlobalSet(ix) => print_indent(&format!("(global_set ${ix})"), *depth),
                 I32Const(c) => print_indent(&format!("(i32_const {c})"), *depth),
-                I32Load { offset, alignment } => {
+                I32Load { offset, alignment: _ } => {
                     print_indent(&format!("(i32_load {offset})"), *depth)
                 }
-                I32Store { offset, alignment } => {
+                I32Store { offset, alignment: _ } => {
                     print_indent(&format!("(i32_store {offset})"), *depth)
                 }
-                Add => print_indent("(add)", *depth),
-                Gt => print_indent("(gt)", *depth),
-                Ge => print_indent("(ge)", *depth),
+                UnOp(op) => print_indent(&format!("({op:?})"), *depth),
+                BinOp(op) => print_indent(&format!("({op:?})"), *depth),
                 _other => print_indent("(inst)", *depth),
             }
         }

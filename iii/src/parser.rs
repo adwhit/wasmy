@@ -12,12 +12,15 @@ use nom::{
 
 type Result<'a, T> = IResult<&'a [u8], T>;
 
-use crate::{Binary, Code, Data, Export, ExportType, FuncSig, Global, Limits, Mutability, Names};
+use crate::{
+    BinOp, Binary, Code, Data, Export, ExportType, FuncSig, Global, Limits, Mutability, Names, UnOp,
+};
 
 use super::{Instruction, Value};
 
 #[derive(Debug, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 pub enum OpCode {
+    Unreachable = 0x00,
     NoOp = 0x01,
     Block = 0x02,
     Loop = 0x03,
@@ -39,10 +42,16 @@ pub enum OpCode {
     I32Load = 0x28,
     I32Store = 0x36,
     I32Const = 0x41,
+    I64Const = 0x42,
+    Eqz = 0x45,
+    Lt = 0x48,
+    LtU = 0x49,
     Gt = 0x4b,
     Ge = 0x4e,
     Add = 0x6a,
     Sub = 0x6b,
+    Or = 0x72,
+    Shl = 0x74,
 }
 
 fn opcode(input: &[u8]) -> Result<OpCode> {
@@ -63,22 +72,24 @@ fn ast(mut input: &[u8]) -> Result<Vec<Instruction>> {
 }
 
 fn instruction(input: &[u8]) -> Result<Instruction> {
-    // if !input.is_empty() {
-    //     println!("{:x?}", input[0])
-    // }
+    if !input.is_empty() {
+        println!("byte: {:x?}", input[0])
+    }
     use Instruction as I;
     use OpCode as O;
     let (input, op) = opcode(input)?;
-    // println!("raw: {:?}", op);
+    println!("op: {op:?}");
     let op = match op {
+        O::Unreachable => Ok((input, I::Unreachable)),
+        O::NoOp => Ok((input, I::NoOp)),
         O::Block => {
             let (input, typ) = value(input)?;
-            let (input, expr) = ast(&input)?;
+            let (input, expr) = ast(input)?;
             Ok((input, I::Block { typ, expr }))
         }
         O::Loop => {
             let (input, typ) = value(input)?;
-            let (input, expr) = ast(&input)?;
+            let (input, expr) = ast(input)?;
             Ok((input, I::Loop { typ, expr }))
         }
         O::End => Ok((input, I::End)),
@@ -106,10 +117,15 @@ fn instruction(input: &[u8]) -> Result<Instruction> {
             I::I32Load { offset, alignment }
         })(input),
         O::I32Const => map(leb128_i32, I::I32Const)(input),
-        O::Gt => Ok((input, I::Gt)),
-        O::Ge => Ok((input, I::Ge)),
-        O::Add => Ok((input, I::Add)),
-        O::Sub => Ok((input, I::Sub)),
+        O::I64Const => map(leb128_i64, I::I64Const)(input),
+        O::Eqz => Ok((input, I::UnOp(UnOp::Eqz))),
+        O::Gt => Ok((input, I::BinOp(BinOp::Gt))),
+        O::Ge => Ok((input, I::BinOp(BinOp::Ge))),
+        O::Add => Ok((input, I::BinOp(BinOp::Add))),
+        O::Sub => Ok((input, I::BinOp(BinOp::Sub))),
+        O::Shl => Ok((input, I::BinOp(BinOp::Shl))),
+        O::Lt => Ok((input, I::BinOp(BinOp::Lt))),
+        O::LtU => Ok((input, I::BinOp(BinOp::LtU))),
         s => todo!("{s:?}"),
     };
     // println!("parsed: {:?}", op.as_ref().map(|v| &v.1).unwrap());
@@ -261,6 +277,26 @@ fn leb128_i32(mut input: &[u8]) -> Result<i32> {
     loop {
         (input, byte) = u8(input)?;
         result |= ((MASK & byte) as u32) << shift;
+        shift += 7;
+        if byte >> 7 == 0 {
+            break;
+        }
+    }
+    if (shift < size) && (0x40 & byte != 0) {
+        // sign-extend
+        result |= !0 << shift;
+    }
+    Ok((input, unsafe { std::mem::transmute(result) }))
+}
+
+fn leb128_i64(mut input: &[u8]) -> Result<i64> {
+    let mut result = 0;
+    let mut shift = 0;
+    let mut byte;
+    let size = 64;
+    loop {
+        (input, byte) = u8(input)?;
+        result |= ((MASK & byte) as u64) << shift;
         shift += 7;
         if byte >> 7 == 0 {
             break;

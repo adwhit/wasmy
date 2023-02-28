@@ -1,9 +1,7 @@
-#![no_std]
-
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
+// #[panic_handler]
+// fn panic(_info: &core::panic::PanicInfo) -> ! {
+//     loop {}
+// }
 
 #[no_mangle]
 #[inline(never)]
@@ -79,4 +77,9 @@ pub fn get_tuple(x: i32) -> (i32, i32) {
 #[no_mangle]
 pub fn do_get_tuple() -> i32 {
     get_tuple(10).0
+}
+
+#[no_mangle]
+pub fn vec_me(len: usize) -> Vec<u32> {
+    vec![0; len]
 }

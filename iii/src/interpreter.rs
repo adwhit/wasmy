@@ -1,6 +1,6 @@
-use std::{collections::HashMap, fmt::Debug};
+use std::{collections::HashMap};
 
-use crate::{Export, ExportType, Instruction};
+use crate::{ExportType, Instruction};
 use anyhow::bail;
 
 use super::Binary;
@@ -40,6 +40,8 @@ pub fn interpret(binary: &Binary, main: &str) -> anyhow::Result<()> {
     state.locals.push(vec![0; n_locals]);
     state.globals = globals;
 
+    println!("Load binary data");
+
     for d in &binary.data {
         let offset = {
             let mut fake_state = State::new();
@@ -53,7 +55,11 @@ pub fn interpret(binary: &Binary, main: &str) -> anyhow::Result<()> {
         state.memory[offset..].copy_from_slice(&d.init);
     }
 
+    println!("*** Execute '{main}'");
+
     exec(binary, &mut state, &code.code);
+
+    println!("*** Finished");
 
     while let Some(v) = state.try_pop() {
         println!("Value on stack: {v}")
@@ -127,13 +133,14 @@ struct Branch(u32);
 fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Branch> {
     use Instruction::*;
     for i in code {
-        // println!("exec: {i:?}");
+        println!("{state:?}");
+        println!("exec: {i:?}");
         match i {
-            Block { typ, expr } => match exec(binary, state, expr) {
+            Block { typ: _, expr } => match exec(binary, state, expr) {
                 Some(Branch(0)) | None => {}
                 Some(Branch(v)) => return Some(Branch(v - 1)),
             },
-            Loop { typ, expr } => {
+            Loop { typ: _, expr } => {
                 loop {
                     match exec(binary, state, expr) {
                         None => break,                                 // exit the loop
@@ -213,14 +220,14 @@ fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Bran
                 let val = state.pop();
                 state.set_global(*ix, val);
             }
-            I32Store { offset, alignment } => {
+            I32Store { offset, alignment: _ } => {
                 let val = state.pop();
                 let base_loc = state.pop();
                 let loc = (base_loc + *offset as i32) as usize;
                 let bytes: [u8; 4] = unsafe { std::mem::transmute(val) };
                 state.memory[loc..loc + 4].copy_from_slice(&bytes);
             }
-            I32Load { offset, alignment } => {
+            I32Load { offset, alignment: _ } => {
                 let base_loc = state.pop();
                 let loc = (base_loc + *offset as i32) as usize;
                 let slice: &[u8] = &state.memory[loc..loc + 4];
@@ -231,29 +238,52 @@ fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Bran
             I32Const(val) => {
                 state.push(*val);
             }
-            Add => {
-                let val1 = state.pop();
-                let val2 = state.pop();
-                // println!("add {val1} + {val2}");
-                state.push(val1 + val2);
-            }
-            Sub => {
+            BinOp(op) => {
                 let val2 = state.pop();
                 let val1 = state.pop();
-                state.push(val1 - val2);
-            }
-            Ge => {
-                let val2 = state.pop();
-                let val1 = state.pop();
-                state.push(if val1 >= val2 { 1 } else { 0 });
-            }
-            Gt => {
-                let val2 = state.pop();
-                let val1 = state.pop();
-                state.push(if val1 > val2 { 1 } else { 0 });
+                use crate::BinOp::*;
+                let res = match op {
+                    Add => val1 + val2,
+                    Sub => val1 - val2,
+                    Ge => {
+                        if val1 >= val2 {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    Gt => {
+                        if val1 > val2 {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    Shl => val1 << val2,
+                    Lt => {
+                        if val1 < val2 {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    LtU => {
+                        if u(val1) < u(val2) {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    _ => todo!("cannot eval: {op:?}"),
+                };
+                state.push(res);
             }
             other => todo!("interpreter {other:?}"),
         }
     }
     None
+}
+
+fn u(v: i32) -> u32 {
+    unsafe { std::mem::transmute(v) }
 }

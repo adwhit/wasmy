@@ -9,6 +9,7 @@ use clap::Parser;
 
 mod interpreter;
 mod parser;
+mod validator;
 
 use parser::parse_wasm;
 
@@ -332,7 +333,7 @@ fn main() -> anyhow::Result<()> {
     let binary = parse_wasm(&code).map_err(|e| anyhow::format_err!("{:?}", e.code))?;
     match cli.action {
         Action::Validate => {
-            todo!("no validation yet")
+            validator::validate(&binary)?;
         }
         Action::Show => {
             println!("{binary}");

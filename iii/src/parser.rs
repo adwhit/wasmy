@@ -88,12 +88,26 @@ pub enum OpCode {
     LeU          = 0x4d,
     Ge           = 0x4e,
     GeU          = 0x4f,
-    I64Eqz       = 0x5a,
+    I64Eqz       = 0x50,
+    I64Eq        = 0x51,
+    I64Neq       = 0x52,
+    I64Lt        = 0x53,
+    I64LtU       = 0x54,
+    I64Gt        = 0x55,
+    I64GtU       = 0x56,
+    I64Le        = 0x57,
+    I64LeU       = 0x58,
+    I64Ge        = 0x59,
+    I64GeU       = 0x5a,
+    Clz          = 0x67,
+    Ctz          = 0x68,
     Add          = 0x6a,
     Sub          = 0x6b,
     Mul          = 0x6c,
-    Clz          = 0x67,
-    Ctz          = 0x68,
+    Div          = 0x6d,
+    DivU         = 0x6e,
+    Rem          = 0x6f,
+    RemU         = 0x70,
     And          = 0x71,
     Or           = 0x72,
     Xor          = 0x73,
@@ -102,6 +116,25 @@ pub enum OpCode {
     ShrU         = 0x76,
     Rotl         = 0x77,
     Rotr         = 0x78,
+    I64Clz       = 0x79,
+    I64Ctz       = 0x7a,
+    I64Add       = 0x7c,
+    I64Sub       = 0x7d,
+    I64Mul       = 0x7e,
+    I64Div       = 0x7f,
+    I64DivU      = 0x80,
+    I64Rem       = 0x81,
+    I64RemU      = 0x82,
+    I64And       = 0x83,
+    I64Or        = 0x84,
+    I64Xor       = 0x85,
+    I64Shl       = 0x86,
+    I64Shr       = 0x87,
+    I64ShrU      = 0x88,
+    I64Rotl      = 0x89,
+    I64Rotr      = 0x8a,
+
+    Wrap         = 0xa7
 }
 
 fn opcode(input: &[u8]) -> Result<OpCode> {
@@ -170,11 +203,11 @@ fn instruction(input: &[u8]) -> Result<Instruction> {
         O::LocalTee  => return map(leb128_u32, I::LocalTee )(input),
         O::GlobalGet => return map(leb128_u32, I::GlobalGet)(input),
         O::GlobalSet => return map(leb128_u32, I::GlobalSet)(input),
-        O::I32Store | O::I32Store8
+        | O::I32Store | O::I32Store8 | O::I32Store16
         | O::I64Store
-        | O::I32Load | O::I32Load8
-        | O::U32Load8
-        | O::I64Load | O::I64Load32
+        | O::I32Load  | O::I32Load8
+        | O::U32Load8 | O::U32Load16
+        | O::I64Load  | O::I64Load32
         | O::U64Load32 => {
             return map(tuple((leb128_u32, leb128_u32)), |(offset, alignment)| {
                 I::MemOp {
@@ -203,6 +236,21 @@ fn instruction(input: &[u8]) -> Result<Instruction> {
         O::LeU  => I::BinOpSigned { op: B::Le,  size: X32, sign: Unsigned },
         O::Shr  => I::BinOpSigned { op: B::Shr, size: X32, sign: Signed   },
         O::ShrU => I::BinOpSigned { op: B::Shr, size: X32, sign: Unsigned },
+        O::Div  => I::BinOpSigned { op: B::Div, size: X32, sign: Signed   },
+        O::DivU => I::BinOpSigned { op: B::Div, size: X32, sign: Unsigned },
+
+        O::I64Gt   => I::BinOpSigned { op: B::Gt,  size: X64, sign: Signed   },
+        O::I64GtU  => I::BinOpSigned { op: B::Gt,  size: X64, sign: Unsigned },
+        O::I64Ge   => I::BinOpSigned { op: B::Ge,  size: X64, sign: Signed   },
+        O::I64GeU  => I::BinOpSigned { op: B::Ge,  size: X64, sign: Unsigned },
+        O::I64Lt   => I::BinOpSigned { op: B::Lt,  size: X64, sign: Signed   },
+        O::I64LtU  => I::BinOpSigned { op: B::Lt,  size: X64, sign: Unsigned },
+        O::I64Le   => I::BinOpSigned { op: B::Le,  size: X64, sign: Signed   },
+        O::I64LeU  => I::BinOpSigned { op: B::Le,  size: X64, sign: Unsigned },
+        O::I64Shr  => I::BinOpSigned { op: B::Shr, size: X64, sign: Signed   },
+        O::I64ShrU => I::BinOpSigned { op: B::Shr, size: X64, sign: Unsigned },
+        O::I64Div  => I::BinOpSigned { op: B::Div, size: X64, sign: Signed   },
+        O::I64DivU => I::BinOpSigned { op: B::Div, size: X64, sign: Unsigned },
 
         O::Add  => I::BinOp { op: BinOp::Add,  size: X32 },
         O::And  => I::BinOp { op: BinOp::And,  size: X32 },
@@ -215,6 +263,20 @@ fn instruction(input: &[u8]) -> Result<Instruction> {
         O::Xor  => I::BinOp { op: BinOp::Xor,  size: X32 },
         O::Rotl => I::BinOp { op: BinOp::Rotl, size: X32 },
         O::Rotr => I::BinOp { op: BinOp::Rotr, size: X32 },
+
+        O::I64Add  => I::BinOp { op: BinOp::Add,  size: X64 },
+        O::I64And  => I::BinOp { op: BinOp::And,  size: X64 },
+        O::I64Sub  => I::BinOp { op: BinOp::Sub,  size: X64 },
+        O::I64Shl  => I::BinOp { op: BinOp::Shl,  size: X64 },
+        O::I64Mul  => I::BinOp { op: BinOp::Mul,  size: X64 },
+        O::I64Eq   => I::BinOp { op: BinOp::Eq,   size: X64 },
+        O::I64Neq  => I::BinOp { op: BinOp::Neq,  size: X64 },
+        O::I64Or   => I::BinOp { op: BinOp::Or,   size: X64 },
+        O::I64Xor  => I::BinOp { op: BinOp::Xor,  size: X64 },
+        O::I64Rotl => I::BinOp { op: BinOp::Rotl, size: X64 },
+        O::I64Rotr => I::BinOp { op: BinOp::Rotr, size: X64 },
+
+        O::Wrap => I::Wrap,
 
         s => todo!("{s:?}"),
     };
@@ -230,7 +292,9 @@ impl TryFrom<OpCode> for MemOp {
             OpCode::I64Load => MemOp::I64Load,
             OpCode::I32Load8 => MemOp::I32Load8,
             OpCode::U32Load8 => MemOp::U32Load8,
+            OpCode::U32Load16 => MemOp::U32Load16,
             OpCode::I32Store => MemOp::I32Store,
+            OpCode::I32Store16 => MemOp::I32Store16,
             OpCode::I64Store => MemOp::I64Store,
             OpCode::U64Load32 => MemOp::U64Load32,
             OpCode::I32Store8 => MemOp::I32Store8,
@@ -504,6 +568,14 @@ fn section(input: &[u8]) -> Result<Section> {
                 "name" => {
                     let (_, names) = names(input)?;
                     Section::Names(names)
+                }
+                ".debug_info" | ".debug_pubtypes" | ".debug_ranges" | ".debug_abbrev"
+                | ".debug_line" | ".debug_str" | ".debug_pubnames" | "producers" => {
+                    println!("Debug info {}", section_data.len());
+                    Section::Anon(AnonSection {
+                        id,
+                        data: section_data.to_vec(),
+                    })
                 }
                 _ => todo!("{slice}"),
             }

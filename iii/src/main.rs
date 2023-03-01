@@ -194,6 +194,7 @@ pub enum Instruction {
         size: Size,
         sign: Sign,
     },
+    Wrap,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -250,8 +251,10 @@ pub enum MemOp {
     I32Store,
     I64Store,
     I32Store8,
+    I32Store16,
     I32Load8,
     U32Load8,
+    U32Load16,
     I64Load32,
     U64Load32,
 }

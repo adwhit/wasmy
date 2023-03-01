@@ -242,7 +242,8 @@ fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Bran
                 }
                 _ => todo!("{i:?}"),
             },
-            BinOp(op) => {
+            BinOp { op, size } => {
+                todo!();
                 let val2 = state.pop();
                 let val1 = state.pop();
                 use crate::BinOp::*;

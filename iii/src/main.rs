@@ -131,7 +131,6 @@ pub struct Code {
 
 #[derive(Debug, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 pub enum Value {
-    None = 0x40,
     I32 = 0x7f,
     I64 = 0x7e,
     F32 = 0x7d,
@@ -150,11 +149,11 @@ pub enum Instruction {
     Unreachable,
     NoOp,
     Block {
-        typ: Value,
+        typ: Option<Value>,
         expr: Vec<Instruction>,
     },
     Loop {
-        typ: Value,
+        typ: Option<Value>,
         expr: Vec<Instruction>,
     },
     End,
@@ -182,12 +181,46 @@ pub enum Instruction {
     },
     I32Const(i32),
     I64Const(i64),
-    UnOp(UnOp),
-    BinOp(BinOp),
+    UnaryOp {
+        op: UnaryOp,
+        size: Size,
+    },
+    BinOp {
+        op: BinOp,
+        size: Size,
+    },
+    BinOpSigned {
+        op: BinOpSigned,
+        size: Size,
+        sign: Sign,
+    },
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum Size {
+    X32,
+    X64,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum Sign {
+    Signed,
+    Unsigned,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum BinOpSigned {
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    Div,
+    Rem,
+    Shr,
 }
 
 #[derive(Debug)]
-pub enum UnOp {
+pub enum UnaryOp {
     Eqz,
     Ctz,
     Clz,
@@ -200,22 +233,14 @@ pub enum BinOp {
     Sub,
     Le,
     LeU,
-    Lt,
-    LtU,
     Eq,
     Neq,
-    Gt,
-    GtU,
-    Ge,
-    GeU,
     Mul,
     Or,
     Xor,
     Rotl,
     Rotr,
     Shl,
-    Shr,
-    ShrU,
 }
 
 #[derive(Debug)]
@@ -226,9 +251,9 @@ pub enum MemOp {
     I64Store,
     I32Store8,
     I32Load8,
-    I32Load8U,
+    U32Load8,
     I64Load32,
-    I64Load32U,
+    U64Load32,
 }
 
 #[derive(Debug)]
@@ -282,8 +307,8 @@ fn print_ast(code: &[Instruction]) {
                     alignment: _,
                     op,
                 } => print_indent(&format!("({op:?} {offset})"), *depth),
-                UnOp(op) => print_indent(&format!("({op:?})"), *depth),
-                BinOp(op) => print_indent(&format!("({op:?})"), *depth),
+                UnaryOp { op, .. } => print_indent(&format!("({op:?})"), *depth),
+                BinOp { op, .. } => print_indent(&format!("({op:?})"), *depth),
                 _other => print_indent("(inst)", *depth),
             }
         }

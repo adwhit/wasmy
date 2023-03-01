@@ -1,6 +1,7 @@
 use num_traits::FromPrimitive;
 
 use nom::{
+    branch,
     bytes::complete::{tag, take_while},
     combinator::{eof, map, map_opt, map_res, opt},
     multi::{count, length_count, length_data, many1},
@@ -13,70 +14,94 @@ use nom::{
 type Result<'a, T> = IResult<&'a [u8], T>;
 
 use crate::{
-    BinOp, Binary, Code, Data, Export, ExportType, FuncSig, Global, Limits, MemOp, Mutability,
-    Names, UnOp,
+    BinOp, BinOpSigned, Binary, Code, Data, Export, ExportType, FuncSig, Global, Limits, MemOp,
+    Mutability, Names, UnaryOp,
 };
 
 use super::{Instruction, Value};
 
+#[rustfmt::skip]
 #[derive(Debug, Clone, Copy, num_derive::FromPrimitive, num_derive::ToPrimitive)]
 pub enum OpCode {
-    Unreachable = 0x00,
-    NoOp = 0x01,
-    Block = 0x02,
-    Loop = 0x03,
-    If = 0x04,
-    Else = 0x05,
-    End = 0x0B,
-    Br = 0x0C,
-    BrIf = 0x0D,
-    BrTable = 0x0E,
-    Return = 0x0F,
-    Call = 0x10,
+    // Control
+    Unreachable  = 0x00,
+    NoOp         = 0x01,
+    Block        = 0x02,
+    Loop         = 0x03,
+    If           = 0x04,
+    Else         = 0x05,
+    End          = 0x0B,
+    Br           = 0x0C,
+    BrIf         = 0x0D,
+    BrTable      = 0x0E,
+    Return       = 0x0F,
+    Call         = 0x10,
     CallIndirect = 0x11,
-    Drop = 0x1A,
-    Select = 0x1B,
-    LocalGet = 0x20,
-    LocalSet = 0x21,
-    LocalTee = 0x22,
-    GlobalGet = 0x23,
-    GlobalSet = 0x24,
-    I32Load = 0x28,
-    I64Load = 0x29,
-    I32Load8 = 0x2c,
-    I32Load8U = 0x2d,
-    I64Load32 = 0x34,
-    I64Load32U = 0x35,
-    I32Store = 0x36,
-    I64Store = 0x37,
-    I32Store8 = 0x3a,
-    MemoryGrow = 0x40,
-    I32Const = 0x41,
-    I64Const = 0x42,
-    Eqz = 0x45,
-    Eq = 0x46,
-    Neq = 0x47,
-    Lt = 0x48,
-    LtU = 0x49,
-    Gt = 0x4a,
-    GtU = 0x4b,
-    Le = 0x4c,
-    LeU = 0x4d,
-    Ge = 0x4e,
-    GeU = 0x4f,
-    Add = 0x6a,
-    Sub = 0x6b,
-    Mul = 0x6c,
-    Clz = 0x67,
-    Ctz = 0x68,
-    And = 0x71,
-    Or = 0x72,
-    Xor = 0x73,
-    Shl = 0x74,
-    Shr = 0x75,
-    ShrU = 0x76,
-    Rotl = 0x77,
-    Rotr = 0x78,
+    Drop         = 0x1A,
+    Select       = 0x1B,
+
+    // Mem
+    LocalGet     = 0x20,
+    LocalSet     = 0x21,
+    LocalTee     = 0x22,
+    GlobalGet    = 0x23,
+    GlobalSet    = 0x24,
+    I32Load      = 0x28,
+    I64Load      = 0x29,
+    F32Load      = 0x2a,
+    F64Load      = 0x2b,
+    I32Load8     = 0x2c,
+    U32Load8     = 0x2d,
+    I32Load16    = 0x2e,
+    U32Load16    = 0x2f,
+    I64Load8     = 0x30,
+    U64Load8     = 0x31,
+    I64Load16    = 0x32,
+    U64Load16    = 0x33,
+    I64Load32    = 0x34,
+    U64Load32    = 0x35,
+    I32Store     = 0x36,
+    I64Store     = 0x37,
+    F32Store     = 0x38,
+    F64Store     = 0x39,
+    I32Store8    = 0x3a,
+    I32Store16   = 0x3b,
+    I64Store8    = 0x3c,
+    I64Store16   = 0x3d,
+    I64Store32   = 0x3e,
+    MemorySize   = 0x3f,
+    MemoryGrow   = 0x40,
+    I32Const     = 0x41,
+    I64Const     = 0x42,
+    F32Const     = 0x43,
+    F64Const     = 0x44,
+
+    // Operations
+    Eqz          = 0x45,
+    Eq           = 0x46,
+    Neq          = 0x47,
+    Lt           = 0x48,
+    LtU          = 0x49,
+    Gt           = 0x4a,
+    GtU          = 0x4b,
+    Le           = 0x4c,
+    LeU          = 0x4d,
+    Ge           = 0x4e,
+    GeU          = 0x4f,
+    I64Eqz       = 0x5a,
+    Add          = 0x6a,
+    Sub          = 0x6b,
+    Mul          = 0x6c,
+    Clz          = 0x67,
+    Ctz          = 0x68,
+    And          = 0x71,
+    Or           = 0x72,
+    Xor          = 0x73,
+    Shl          = 0x74,
+    Shr          = 0x75,
+    ShrU         = 0x76,
+    Rotl         = 0x77,
+    Rotr         = 0x78,
 }
 
 fn opcode(input: &[u8]) -> Result<OpCode> {
@@ -96,96 +121,105 @@ fn ast(mut input: &[u8]) -> Result<Vec<Instruction>> {
     }
 }
 
+#[rustfmt::skip]
 fn instruction(input: &[u8]) -> Result<Instruction> {
     if !input.is_empty() {
         println!("byte: {:x?}", input[0])
     }
     use Instruction as I;
     use OpCode as O;
+    use BinOpSigned as B;
+    use crate::Sign::*;
+    use crate::Size::*;
     let (input, op) = opcode(input)?;
     println!("op: {op:?}");
     let op = match op {
-        O::Unreachable => Ok((input, I::Unreachable)),
-        O::NoOp => Ok((input, I::NoOp)),
+        O::Unreachable => I::Unreachable,
+        O::NoOp => I::NoOp,
         O::Block => {
-            let (input, typ) = value(input)?;
+            let (input, typ) = branch::alt((map(value, Option::Some), map(tag(&[0x40]), |_| None)))(input)?;
             let (input, expr) = ast(input)?;
-            Ok((input, I::Block { typ, expr }))
+            return Ok((input, I::Block { typ, expr }));
         }
         O::Loop => {
-            let (input, typ) = value(input)?;
+            let (input, typ) = branch::alt((map(value, Option::Some), map(tag(&[0x40]), |_| None)))(input)?;
             let (input, expr) = ast(input)?;
-            Ok((input, I::Loop { typ, expr }))
+            return Ok((input, I::Loop { typ, expr }));
         }
-        O::End => Ok((input, I::End)),
-        O::Br => map(leb128_u32, I::Br)(input),
-        O::BrIf => map(leb128_u32, I::BrIf)(input),
-        O::BrTable => map(
-            tuple((length_count(leb128_u32, leb128_u32), leb128_u32)),
-            |(branch_ixs, default_ix)| I::BrTable {
-                branch_ixs,
-                default_ix,
-            },
-        )(input),
-        O::Return => Ok((input, I::Return)),
-        O::Call => map(leb128_u32, I::Call)(input),
-        O::CallIndirect => map(terminated(leb128_u32, tag(&[0x00])), I::CallIndirect)(input),
-        O::Drop => Ok((input, I::Drop)),
-        O::Select => Ok((input, I::Select)),
-        O::LocalGet => map(leb128_u32, I::LocalGet)(input),
-        O::LocalSet => map(leb128_u32, I::LocalSet)(input),
-        O::LocalTee => map(leb128_u32, I::LocalTee)(input),
-        O::GlobalGet => map(leb128_u32, I::GlobalGet)(input),
-        O::GlobalSet => map(leb128_u32, I::GlobalSet)(input),
-        O::I32Store
+        O::End => I::End,
+        O::Br => return map(leb128_u32, I::Br)(input),
+        O::BrIf => return map(leb128_u32, I::BrIf)(input),
+        O::BrTable => {
+            return map(
+                tuple((length_count(leb128_u32, leb128_u32), leb128_u32)),
+                |(branch_ixs, default_ix)| I::BrTable {
+                    branch_ixs,
+                    default_ix,
+                },
+            )(input)
+        }
+        O::Return => I::Return,
+        O::Call => return map(leb128_u32, I::Call)(input),
+        O::CallIndirect => {
+            return map(terminated(leb128_u32, tag(&[0x00])), I::CallIndirect)(input)
+        }
+        O::Drop   => I::Drop,
+        O::Select => I::Select,
+        O::LocalGet  => return map(leb128_u32, I::LocalGet )(input),
+        O::LocalSet  => return map(leb128_u32, I::LocalSet )(input),
+        O::LocalTee  => return map(leb128_u32, I::LocalTee )(input),
+        O::GlobalGet => return map(leb128_u32, I::GlobalGet)(input),
+        O::GlobalSet => return map(leb128_u32, I::GlobalSet)(input),
+        O::I32Store | O::I32Store8
         | O::I64Store
-        | O::I32Store8
-        | O::I32Load
-        | O::I64Load
-        | O::I32Load8
-        | O::I32Load8U
-        | O::I64Load32
-        | O::I64Load32U => map(tuple((leb128_u32, leb128_u32)), |(offset, alignment)| {
-            I::MemOp {
-                offset,
-                alignment,
-                op: MemOp::try_from(op).unwrap(),
-            }
-        })(input),
-        O::MemoryGrow => Ok((input, I::MemoryGrow)),
-        O::I32Const => map(leb128_i32, I::I32Const)(input),
-        O::I64Const => map(leb128_i64, I::I64Const)(input),
+        | O::I32Load | O::I32Load8
+        | O::U32Load8
+        | O::I64Load | O::I64Load32
+        | O::U64Load32 => {
+            return map(tuple((leb128_u32, leb128_u32)), |(offset, alignment)| {
+                I::MemOp {
+                    offset,
+                    alignment,
+                    op: MemOp::try_from(op).unwrap(),
+                }
+            })(input)
+        }
+        O::MemoryGrow => I::MemoryGrow,
+        O::I32Const => return map(leb128_i32, I::I32Const)(input),
+        O::I64Const => return map(leb128_i64, I::I64Const)(input),
 
-        O::Eqz => Ok((input, I::UnOp(UnOp::Eqz))),
-        O::Ctz => Ok((input, I::UnOp(UnOp::Ctz))),
-        O::Clz => Ok((input, I::UnOp(UnOp::Clz))),
+        O::Eqz    => I::UnaryOp { op: UnaryOp::Eqz, size: X32 },
+        O::I64Eqz => I::UnaryOp { op: UnaryOp::Eqz, size: X64 },
+        O::Ctz    => I::UnaryOp { op: UnaryOp::Ctz, size: X32 },
+        O::Clz    => I::UnaryOp { op: UnaryOp::Clz, size: X32 },
 
-        O::Gt => Ok((input, I::BinOp(BinOp::Gt))),
-        O::GtU => Ok((input, I::BinOp(BinOp::GtU))),
-        O::Ge => Ok((input, I::BinOp(BinOp::Ge))),
-        O::GeU => Ok((input, I::BinOp(BinOp::GeU))),
-        O::Add => Ok((input, I::BinOp(BinOp::Add))),
-        O::And => Ok((input, I::BinOp(BinOp::And))),
-        O::Sub => Ok((input, I::BinOp(BinOp::Sub))),
-        O::Shl => Ok((input, I::BinOp(BinOp::Shl))),
-        O::Shr => Ok((input, I::BinOp(BinOp::Shr))),
-        O::ShrU => Ok((input, I::BinOp(BinOp::ShrU))),
-        O::Le => Ok((input, I::BinOp(BinOp::Le))),
-        O::LeU => Ok((input, I::BinOp(BinOp::LeU))),
-        O::Lt => Ok((input, I::BinOp(BinOp::Lt))),
-        O::Mul => Ok((input, I::BinOp(BinOp::Mul))),
-        O::Eq => Ok((input, I::BinOp(BinOp::Eq))),
-        O::Neq => Ok((input, I::BinOp(BinOp::Neq))),
-        O::LtU => Ok((input, I::BinOp(BinOp::LtU))),
-        O::Or => Ok((input, I::BinOp(BinOp::Or))),
-        O::Xor => Ok((input, I::BinOp(BinOp::Xor))),
-        O::Rotl => Ok((input, I::BinOp(BinOp::Rotl))),
-        O::Rotr => Ok((input, I::BinOp(BinOp::Rotr))),
+        O::Gt   => I::BinOpSigned { op: B::Gt,  size: X32, sign: Signed   },
+        O::GtU  => I::BinOpSigned { op: B::Gt,  size: X32, sign: Unsigned },
+        O::Ge   => I::BinOpSigned { op: B::Ge,  size: X32, sign: Signed   },
+        O::GeU  => I::BinOpSigned { op: B::Ge,  size: X32, sign: Unsigned },
+        O::Lt   => I::BinOpSigned { op: B::Lt,  size: X32, sign: Signed   },
+        O::LtU  => I::BinOpSigned { op: B::Lt,  size: X32, sign: Unsigned },
+        O::Le   => I::BinOpSigned { op: B::Le,  size: X32, sign: Signed   },
+        O::LeU  => I::BinOpSigned { op: B::Le,  size: X32, sign: Unsigned },
+        O::Shr  => I::BinOpSigned { op: B::Shr, size: X32, sign: Signed   },
+        O::ShrU => I::BinOpSigned { op: B::Shr, size: X32, sign: Unsigned },
+
+        O::Add  => I::BinOp { op: BinOp::Add,  size: X32 },
+        O::And  => I::BinOp { op: BinOp::And,  size: X32 },
+        O::Sub  => I::BinOp { op: BinOp::Sub,  size: X32 },
+        O::Shl  => I::BinOp { op: BinOp::Shl,  size: X32 },
+        O::Mul  => I::BinOp { op: BinOp::Mul,  size: X32 },
+        O::Eq   => I::BinOp { op: BinOp::Eq,   size: X32 },
+        O::Neq  => I::BinOp { op: BinOp::Neq,  size: X32 },
+        O::Or   => I::BinOp { op: BinOp::Or,   size: X32 },
+        O::Xor  => I::BinOp { op: BinOp::Xor,  size: X32 },
+        O::Rotl => I::BinOp { op: BinOp::Rotl, size: X32 },
+        O::Rotr => I::BinOp { op: BinOp::Rotr, size: X32 },
 
         s => todo!("{s:?}"),
     };
     // println!("parsed: {:?}", op.as_ref().map(|v| &v.1).unwrap());
-    op
+    Ok((input, op))
 }
 
 impl TryFrom<OpCode> for MemOp {
@@ -195,10 +229,10 @@ impl TryFrom<OpCode> for MemOp {
             OpCode::I32Load => MemOp::I32Load,
             OpCode::I64Load => MemOp::I64Load,
             OpCode::I32Load8 => MemOp::I32Load8,
-            OpCode::I32Load8U => MemOp::I32Load8U,
+            OpCode::U32Load8 => MemOp::U32Load8,
             OpCode::I32Store => MemOp::I32Store,
             OpCode::I64Store => MemOp::I64Store,
-            OpCode::I64Load32U => MemOp::I64Load32U,
+            OpCode::U64Load32 => MemOp::U64Load32,
             OpCode::I32Store8 => MemOp::I32Store8,
             _ => return Err(()),
         };

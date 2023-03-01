@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{ExportType, Instruction, MemOp};
+use crate::{ExportType, Instruction, MemOp, Sign, Size};
 use anyhow::bail;
 
 use super::Binary;
@@ -128,32 +128,39 @@ impl State {
     }
 }
 
-struct Branch(u32);
+enum ExitBlock {
+    Branch(u32),
+    FallThrough,
+    Return,
+}
 
-fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Branch> {
+fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> ExitBlock {
     use Instruction::*;
     for i in code {
         println!("{state:?}");
         println!("exec: {i:?}");
         match i {
             Block { typ: _, expr } => match exec(binary, state, expr) {
-                Some(Branch(0)) | None => {}
-                Some(Branch(v)) => return Some(Branch(v - 1)),
+                ExitBlock::Branch(0) | ExitBlock::FallThrough => {}
+                ExitBlock::Return => return ExitBlock::Return,
+                ExitBlock::Branch(v) => return ExitBlock::Branch(v - 1),
             },
             Loop { typ: _, expr } => {
                 loop {
                     match exec(binary, state, expr) {
-                        None => break,                                 // exit the loop
-                        Some(Branch(0)) => {}                          // repeat the loop
-                        Some(Branch(v)) => return Some(Branch(v - 1)), // branch outside the loop
+                        ExitBlock::FallThrough => break, // exit the loop
+                        ExitBlock::Branch(0) => {}       // repeat the loop
+                        ExitBlock::Return => return ExitBlock::Return,
+                        ExitBlock::Branch(v) => return ExitBlock::Branch(v - 1), // branch outside loop
                     }
                 }
             }
             End => { /* Do nothing? */ }
+            Br(ix) => return ExitBlock::Branch(*ix),
             BrIf(ix) => {
                 let val = state.pop();
                 if val != 0 {
-                    return Some(Branch(*ix));
+                    return ExitBlock::Branch(*ix);
                 }
             }
             BrTable {
@@ -162,11 +169,11 @@ fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Bran
             } => {
                 let val = state.pop();
                 if branch_ixs.len() < val as usize {
-                    return Some(Branch(*default_ix));
+                    return ExitBlock::Branch(*default_ix);
                 }
-                return Some(Branch(branch_ixs[val as usize]));
+                return ExitBlock::Branch(branch_ixs[val as usize]);
             }
-            Return => todo!(),
+            Return => return ExitBlock::Return,
             Call(ix) => {
                 let func_ix = &binary.functions[*ix as usize];
                 let func_sig = &binary.types[*func_ix as usize];
@@ -220,6 +227,7 @@ fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Bran
                 let val = state.pop();
                 state.set_global(*ix, val);
             }
+            I32Const(val) => state.push(*val),
             MemOp {
                 offset,
                 alignment: _,
@@ -243,13 +251,25 @@ fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Bran
                 _ => todo!("{i:?}"),
             },
             BinOp { op, size } => {
-                todo!();
+                assert_eq!(*size, Size::X32);
                 let val2 = state.pop();
                 let val1 = state.pop();
                 use crate::BinOp::*;
                 let res = match op {
                     Add => val1 + val2,
                     Sub => val1 - val2,
+                    Shl => val1 << val2,
+                    _ => todo!("cannot eval: {op:?}"),
+                };
+                state.push(res);
+            }
+            BinOpSigned { op, size, sign } => {
+                use crate::BinOpSigned::*;
+                assert_eq!(*size, Size::X32);
+                assert_eq!(*sign, Sign::Signed);
+                let val2 = state.pop();
+                let val1 = state.pop();
+                let res = match op {
                     Ge => {
                         if val1 >= val2 {
                             1
@@ -264,16 +284,8 @@ fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Bran
                             0
                         }
                     }
-                    Shl => val1 << val2,
                     Lt => {
                         if val1 < val2 {
-                            1
-                        } else {
-                            0
-                        }
-                    }
-                    LtU => {
-                        if u(val1) < u(val2) {
                             1
                         } else {
                             0
@@ -286,7 +298,7 @@ fn exec(binary: &Binary, state: &mut State, code: &[Instruction]) -> Option<Bran
             other => todo!("interpreter {other:?}"),
         }
     }
-    None
+    ExitBlock::FallThrough
 }
 
 fn u(v: i32) -> u32 {

@@ -199,13 +199,13 @@ pub enum Instruction {
     Wrap,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Size {
     X32,
     X64,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Sign {
     Signed,
     Unsigned,

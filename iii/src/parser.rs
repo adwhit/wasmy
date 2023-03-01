@@ -156,16 +156,16 @@ fn ast(mut input: &[u8]) -> Result<Vec<Instruction>> {
 
 #[rustfmt::skip]
 fn instruction(input: &[u8]) -> Result<Instruction> {
-    if !input.is_empty() {
-        println!("byte: {:x?}", input[0])
-    }
+    // if !input.is_empty() {
+    //     println!("byte: {:x?}", input[0])
+    // }
     use Instruction as I;
     use OpCode as O;
     use BinOpSigned as B;
     use crate::Sign::*;
     use crate::Size::*;
     let (input, op) = opcode(input)?;
-    println!("op: {op:?}");
+    // println!("op: {op:?}");
     let op = match op {
         O::Unreachable => I::Unreachable,
         O::NoOp => I::NoOp,
@@ -377,6 +377,7 @@ pub enum Section {
     Code(Vec<Code>),
     Data(Vec<Data>),
     Names(Names),
+    Custom { name: String, bytes: Vec<u8> },
     Anon(AnonSection),
 }
 
@@ -563,21 +564,21 @@ fn section(input: &[u8]) -> Result<Section> {
             Section::Data(data)
         }
         SectionId::Custom => {
-            let (input, slice) = str_slice(section_data)?;
-            match slice {
+            let (input, tag) = str_slice(section_data)?;
+            match tag {
                 "name" => {
                     let (_, names) = names(input)?;
                     Section::Names(names)
                 }
                 ".debug_info" | ".debug_pubtypes" | ".debug_ranges" | ".debug_abbrev"
                 | ".debug_line" | ".debug_str" | ".debug_pubnames" | "producers" => {
-                    println!("Debug info {}", section_data.len());
-                    Section::Anon(AnonSection {
-                        id,
-                        data: section_data.to_vec(),
-                    })
+                    println!("custom section '{}', len {}", tag, section_data.len());
+                    Section::Custom {
+                        name: tag.to_string(),
+                        bytes: section_data.to_vec(),
+                    }
                 }
-                _ => todo!("{slice}"),
+                _ => todo!("{tag}"),
             }
         }
         _ => Section::Anon(AnonSection {
@@ -604,6 +605,7 @@ fn binary(input: &[u8]) -> Result<Binary> {
             Section::Code(s) => bin.code = s,
             Section::Data(s) => bin.data = s,
             Section::Names(s) => bin.names = s,
+            Section::Custom { name, bytes } => bin.custom.push((name, bytes)),
             Section::Anon(s) => {
                 println!("{s:?}")
             }

@@ -6,6 +6,9 @@ exec func="whatcha_get" opt="":
 show:
     cargo run --bin iii {{blob}} show
 
+validate:
+    cargo run --bin iii {{blob}} validate
+
 build:
     cd demo && cargo build --target wasm32-unknown-unknown --release
     cargo build

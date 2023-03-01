@@ -23,6 +23,7 @@ struct Cli {
 enum Action {
     Exec { main: String },
     Show,
+    Validate,
 }
 
 #[derive(Debug, Default)]
@@ -36,6 +37,7 @@ pub struct Binary {
     pub code: Vec<Code>,
     pub data: Vec<Data>,
     pub names: Names,
+    pub custom: Vec<(String, Vec<u8>)>,
 }
 
 impl Display for Binary {
@@ -329,6 +331,9 @@ fn main() -> anyhow::Result<()> {
     let code = std::fs::read(cli.file)?;
     let binary = parse_wasm(&code).map_err(|e| anyhow::format_err!("{:?}", e.code))?;
     match cli.action {
+        Action::Validate => {
+            todo!("no validation yet")
+        }
         Action::Show => {
             println!("{binary}");
         }
